@@ -13,6 +13,7 @@ See [service status](https://ark.paperclippool.xyz/) before funding.
 - Ark deposits, transfers, refresh, withdrawal, and emergency exits.
 - BOLT11 and BOLT12 Lightning payments when the connected server enables them.
 - An authenticated web interface and command-line tools.
+- Automatic VTXO refresh while the wallet service is online.
 - Umbrel community-store and StartOS 0.3.5 package generation.
 
 The wallet needs a compatible XBT blockchain backend. Use an indexed XBT Knots

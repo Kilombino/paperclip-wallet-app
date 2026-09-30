@@ -6,6 +6,16 @@ The source container targets Linux amd64 and arm64. StartOS packaging targets
 
 ## Setup
 
+Automatic VTXO refresh is enabled by default while the wallet service is online.
+The daemon joins server rounds for eligible balances before expiry. The default
+mainnet refresh threshold is 144 blocks. Keep the server and blockchain backend
+reachable, and allow for refresh fees. Closing the browser does not stop refresh.
+Umbrel restarts the wallet after host restarts unless you explicitly stop it.
+StartOS manages the service lifecycle. Stopping the app stops maintenance.
+Spent, withdrawn, or exiting VTXOs are not selected for new refresh rounds.
+Existing manually configured wallets keep their saved settings; make sure
+`daemon_manual_sync` is false if you want automatic maintenance.
+
 Open the platform's private wallet interface. Umbrel users unlock with their
 app password. StartOS owners use **Actions → Show wallet access token**, then
 paste the token into the wallet. This token grants spending access.

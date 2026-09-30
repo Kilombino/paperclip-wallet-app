@@ -35,7 +35,7 @@ def package(platform, image, destination, app='paperclip-wallet'):
         })
         write(out / 'docker-compose.yml', {'services': {
             'app_proxy': {'environment': {'APP_HOST': app + '_wallet_1', 'APP_PORT': '3000'}},
-            'wallet': {'image': image, 'user': '1000:1000', 'restart': 'on-failure',
+            'wallet': {'image': image, 'user': '1000:1000', 'restart': 'unless-stopped',
                 'stop_grace_period': '2m', 'security_opt': ['no-new-privileges:true'],
                 'cap_drop': ['ALL'], 'volumes': ['${APP_DATA_DIR}/data:/data'],
                 'environment': {'APP_PASSWORD': '${APP_PASSWORD}', 'PAPERCLIP_XBT_MAINNET': '1', 'BARKD_UI_DEFAULT_ARK_SERVER': 'https://ark.paperclippool.xyz'}}
