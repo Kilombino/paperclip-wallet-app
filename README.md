@@ -14,7 +14,7 @@ See [service status](https://ark.paperclippool.xyz/) before funding.
 - BOLT11 and BOLT12 Lightning payments when the connected server enables them.
 - An authenticated web interface and command-line tools.
 - Automatic VTXO refresh while the wallet service is online.
-- Umbrel community-store and StartOS 0.3.5 package generation.
+- Umbrel community-store and StartOS 0.4 wallet packages.
 
 The wallet needs a compatible XBT blockchain backend. Use an indexed XBT Knots
 node, or the private [pruned-node adapter](deployment/PRUNED-NODES.md). SHA-256 BTC nodes
@@ -25,7 +25,7 @@ are not compatible. No private RPC credentials or wallet keys are included.
 See [wallet apps](https://ark.paperclippool.xyz/wallet/) and the
 [connection guide](https://ark.paperclippool.xyz/connect/). Packages use immutable
 container digests. A source wrapper is not an install-tested binary release.
-StartOS 0.4 requires a separate wrapper; do not install the 0.3.5 package on 0.4.
+The [StartOS 0.4 wrapper](https://github.com/connorslab/paperclip-wallet-startos) is separate. The legacy 0.3.5 generator is not the current release target.
 
 See [platform instructions](deployment/PLATFORMS.md) for authentication,
 backend setup, packaging, and restore requirements.

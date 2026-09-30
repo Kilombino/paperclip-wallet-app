@@ -1,8 +1,7 @@
 # Paperclip Wallet on Umbrel and StartOS
 
 These are beta package sources. Image builds and package verification are required before installation.
-The source container targets Linux amd64 and arm64. StartOS packaging targets
-0.3.5; 0.4 uses a different SDK and needs a separate wrapper.
+The source container targets Linux amd64 and arm64. Current StartOS 0.4 packages use https://github.com/connorslab/paperclip-wallet-startos. The generator below retains a legacy 0.3.5 wrapper for reference; it is not the 0.4 package.
 
 ## Setup
 
