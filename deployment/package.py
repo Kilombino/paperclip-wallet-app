@@ -29,7 +29,7 @@ def package(platform, image, destination, app='paperclip-wallet'):
             'developer': 'Paperclip', 'website': 'https://github.com/connorslab/paperclip-wallet-app',
             'repo': 'https://github.com/connorslab/paperclip-wallet-app',
             'support': 'https://github.com/connorslab/paperclip-wallet-app/issues',
-            'dependencies': [], 'gallery': [], 'path': '', 'defaultUsername': '',
+            'icon': 'https://raw.githubusercontent.com/connorslab/paperclip-wallet-app/main/web/icon.svg', 'dependencies': [], 'gallery': [], 'path': '', 'defaultUsername': '',
             'deterministicPassword': True, 'submitter': 'Paperclip',
             'releaseNotes': 'Paperclip beta server preset. Local keys, authenticated access, on-chain, Ark, and server-backed Lightning. Platform restore acceptance testing remains required.'
         })
@@ -101,6 +101,7 @@ verify: paperclip-wallet.s9pk
         (out / 'icon.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="24" fill="#111c2e"/><text x="64" y="92" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="88" fill="#f56835">P</text></svg>\n', encoding='utf-8')
     else:
         raise ValueError('Unknown platform')
+    shutil.copyfile(root / 'web/icon.svg', out / 'icon.svg')
     shutil.copyfile(root / 'deployment/PLATFORMS.md', out / 'INSTRUCTIONS.md')
 
 
