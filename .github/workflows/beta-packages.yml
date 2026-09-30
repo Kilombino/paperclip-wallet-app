@@ -57,6 +57,7 @@ jobs:
             docker exec wallet-$arch python3 /usr/local/lib/paperclip/health.py
             docker exec wallet-$arch python3 -c "from pathlib import Path; assert Path('/usr/local/lib/paperclip/pruned_rpc.py').is_file()"
             docker rm -f wallet-$arch
+            docker image rm "$(cat dist/image.txt)"
           done
           python3 deployment/package.py umbrel --image "$(cat dist/image.txt)" --output dist/umbrel/paperclip-wallet
           printf 'id: paperclip\nname: Paperclip Beta\n' > dist/umbrel/umbrel-app-store.yml
