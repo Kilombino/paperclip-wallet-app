@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 os.umask(0o077)
-for directory in (Path('/data'), Path('/data/wallet')):
+for directory in (Path('/data'), Path('/data/wallet'), Path('/data/chain')):
     if directory.is_symlink():
         raise SystemExit('Refusing a symbolic link for wallet storage')
     directory.mkdir(mode=0o700, exist_ok=True)
@@ -14,4 +14,4 @@ os.setgroups([])
 os.setgid(1000)
 os.setuid(1000)
 os.environ['PAPERCLIP_XBT_MAINNET'] = '1'
-os.execvp('python3', ['python3', '/usr/local/lib/paperclip/entrypoint.py'])
+os.execvp('python3', ['python3', '/usr/local/lib/paperclip/managed-chain.py', 'run'])
