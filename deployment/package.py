@@ -102,6 +102,8 @@ verify: paperclip-wallet.s9pk
     else:
         raise ValueError('Unknown platform')
     shutil.copyfile(root / 'web/icon.svg', out / 'icon.svg')
+    shutil.copyfile(root / 'deployment/BUNDLED-PRUNED.md', out / 'BUNDLED-PRUNED.md')
+    shutil.copyfile(root / 'deployment/PRUNED-NODES.md', out / 'PRUNED-NODES.md')
     shutil.copyfile(root / 'deployment/PLATFORMS.md', out / 'INSTRUCTIONS.md')
 
 

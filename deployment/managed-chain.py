@@ -107,7 +107,7 @@ def supervise():
             if wallet is None:
                 config_path = Path(os.environ.get('BARKD_DATADIR', '/data/wallet')) / 'config.toml'
                 config = tomllib.loads(config_path.read_text()) if config_path.exists() else {}
-                uses_adapter = config.get('bitcoind_address', '').rstrip('/') == 'http://127.0.0.1:18336'
+                uses_adapter = (config.get('bitcoind_address') or '').rstrip('/') == 'http://127.0.0.1:18336'
                 ready = not uses_adapter
                 if uses_adapter:
                     try:

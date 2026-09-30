@@ -28,9 +28,9 @@ vendor, or container address is hardcoded. Platform service discovery remains
 to be implemented; enter the endpoint explicitly for now.
 
 The backend requires an activated XBT node and synchronized transaction history.
-A pruned companion node can use the opt-in private chain adapter described in
-`PRUNED-NODES.md`. Native platform configuration for that adapter is separate
-from the default full-node setup. Retropex, privkeyio, and Paul Lamb variants are compatibility targets,
+A pruned companion node can use the bundled private chain adapter described in
+`BUNDLED-PRUNED.md`. It starts with the wallet after you configure it. Its index
+and credentials persist in the app volume. Retropex, privkeyio, and Paul Lamb variants are compatibility targets,
 not all tested combinations. Use the full/indexed variant where available.
 The network label `main` alone cannot distinguish XBT from BTC.
 
