@@ -6,6 +6,7 @@ import urllib.request
 import urllib.error
 import base64
 import json
+from decimal import Decimal
 import unittest
 
 spec = importlib.util.spec_from_file_location('pruned', Path(__file__).with_name('pruned_rpc.py'))
@@ -55,6 +56,19 @@ class Node:
 
 
 class PrunedTests(unittest.TestCase):
+    def test_rpc_amounts_remain_exact_without_exponents(self):
+        source = '{"mempoolminfee":0.00001000,"vout":[{"value":0.00000001},{"value":20999999.99999999}]}'
+        value = json.loads(source, parse_float=Decimal)
+        encoded = module.rpc_json(value)
+        self.assertEqual(json.loads(encoded, parse_float=Decimal), value)
+        self.assertIn('0.00001000', encoded)
+        self.assertIn('0.00000001', encoded)
+        self.assertIn('20999999.99999999', encoded)
+        self.assertEqual(module.rpc_json({'rate': 1e-5}), '{"rate":0.00001}')
+        for invalid in (float('nan'), float('inf'), Decimal('1e999999')):
+            with self.assertRaises(ValueError):
+                module.rpc_json(invalid)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name)/'index.sqlite'

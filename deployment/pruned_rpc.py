@@ -6,6 +6,7 @@ configured origin; it is not advertised as Bitcoin Core's global txindex.
 """
 import argparse
 import base64
+from decimal import Decimal
 import hmac
 import json
 import os
@@ -21,6 +22,20 @@ XBT_ACTIVATION = 961640
 MAX_BODY = 8 * 1024 * 1024
 
 
+def rpc_json(value):
+    """Keep RPC amounts exact and use decimal notation accepted by CLN."""
+    if isinstance(value, (Decimal, float)):
+        number = value if isinstance(value, Decimal) else Decimal(str(value))
+        if not number.is_finite() or abs(number.adjusted()) > 308:
+            raise ValueError('Invalid RPC number')
+        return format(number, 'f')
+    if isinstance(value, dict):
+        return '{' + ','.join(json.dumps(k) + ':' + rpc_json(v) for k, v in value.items()) + '}'
+    if isinstance(value, (list, tuple)):
+        return '[' + ','.join(rpc_json(v) for v in value) + ']'
+    return json.dumps(value, allow_nan=False)
+
+
 class RpcError(Exception):
     def __init__(self, code, message):
         super().__init__(message)
@@ -33,7 +48,7 @@ class Node:
 
     def call(self, method, params=()):
         token = base64.b64encode(self.cookie.read_bytes().strip()).decode()
-        data = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': list(params)}).encode()
+        data = rpc_json({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': list(params)}).encode()
         request = urllib.request.Request(self.url, data, {
             'Authorization': 'Basic ' + token, 'Content-Type': 'application/json'})
         try:
@@ -41,7 +56,7 @@ class Node:
         except urllib.error.HTTPError as error:
             response = error
         with response:
-            value = json.load(response)
+            value = json.load(response, parse_float=Decimal)
         if value.get('error'):
             raise RpcError(value['error']['code'], value['error']['message'])
         return value['result']
@@ -174,14 +189,14 @@ class Index:
                 raise RpcError(-28, 'Transaction block is no longer in the active chain')
             cached = self.db.execute('SELECT value FROM raw_cache WHERE txid=? AND blockhash=?', [txid, blockhash]).fetchone()
             if cached:
-                value = json.loads(cached[0])
+                value = json.loads(cached[0], parse_float=Decimal)
             else:
                 self.fetch_block(blockhash)
                 value = self.node.call('getrawtransaction', [txid, True, blockhash])
                 if value['txid'] != txid or value.get('blockhash') != blockhash:
                     raise RpcError(-28, 'Transaction does not match the requested block')
                 with self.db:
-                    self.db.execute('INSERT OR REPLACE INTO raw_cache VALUES (?,?,?)', [txid, blockhash, json.dumps(value)])
+                    self.db.execute('INSERT OR REPLACE INTO raw_cache VALUES (?,?,?)', [txid, blockhash, rpc_json(value)])
             current = self.node.call('getblockheader', [blockhash, True])
             if current.get('confirmations', -1) <= 0:
                 raise RpcError(-28, 'Chain changed during transaction lookup')
@@ -267,7 +282,7 @@ def make_server(index, bind, port, cookie):
                 if not 0 < size <= MAX_BODY:
                     self.send_error(413)
                     return
-                req = json.loads(self.rfile.read(size))
+                req = json.loads(self.rfile.read(size), parse_float=Decimal)
                 identifier = req.get('id')
                 result = dispatch(index, req['method'], req.get('params', []))
                 response = {'result': result, 'error': None, 'id': identifier}
@@ -277,7 +292,7 @@ def make_server(index, bind, port, cookie):
                 response = {'result': None, 'error': {'code': -32602, 'message': 'Invalid request'}, 'id': identifier}
             except Exception:
                 response = {'result': None, 'error': {'code': -28, 'message': 'Chain adapter unavailable'}, 'id': identifier}
-            payload = json.dumps(response).encode()
+            payload = rpc_json(response).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(payload)))
