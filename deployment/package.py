@@ -27,7 +27,7 @@ def package(platform, image, destination, app='paperclip-wallet'):
         (out / 'hooks/pre-start').chmod(0o755)
         write(out / 'umbrel-app.yml', {
             'manifestVersion': 1, 'id': app, 'name': 'Paperclip Wallet Beta', 'tagline': 'On-chain, Ark, and Lightning for XBT',
-            'category': 'bitcoin', 'version': '0.7.1', 'port': 38180,
+            'category': 'bitcoin', 'version': '0.7.2', 'port': 38180,
             'description': 'Beta XBT wallet preset to https://ark.paperclippool.xyz. Configure your compatible XBT blockchain backend. Wait for server activation before funding. Back up the complete wallet.',
             'developer': 'Paperclip', 'website': 'https://github.com/connorslab/paperclip-wallet-app',
             'repo': 'https://github.com/connorslab/paperclip-wallet-app',
