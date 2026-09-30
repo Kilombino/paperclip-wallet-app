@@ -1,0 +1,87 @@
+name: Beta wallet images
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package and authentication tests
+        run: |
+          python3 -m unittest discover -s deployment -p test_package.py
+          python3 -m unittest discover -s deployment -p test_container.py
+          node scripts/test-web.mjs
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deployment/Dockerfile
+          load: true
+          tags: ghcr.io/connorslab/paperclip-wallet-app:build-${{ github.run_id }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=wallet-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=wallet-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/connorslab/paperclip-wallet-app
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+      - name: Check fresh authenticated wallet without funding
+        env:
+          IMAGE: ghcr.io/connorslab/paperclip-wallet-app:build-${{ github.run_id }}-${{ matrix.arch }}
+        run: |
+          docker run -d --name wallet-smoke --network none --tmpfs /data:uid=1000,gid=1000,mode=0700 "$IMAGE"
+          for attempt in $(seq 1 30); do
+            if docker exec wallet-smoke python3 /usr/local/lib/paperclip/health.py; then break; fi
+            sleep 2
+          done
+          docker exec wallet-smoke python3 /usr/local/lib/paperclip/health.py
+          docker exec wallet-smoke python3 -c "import os; assert os.environ['BARKD_UI_DEFAULT_ARK_SERVER']=='https://ark.paperclippool.xyz'"
+          docker rm -f wallet-smoke
+          docker push "$IMAGE"
+  manifest:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish immutable candidate and package sources
+        env:
+          IMAGE: ghcr.io/connorslab/paperclip-wallet-app
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          docker buildx imagetools create -t "$IMAGE:beta-$RUN_ID" "$IMAGE:build-$RUN_ID-amd64" "$IMAGE:build-$RUN_ID-arm64"
+          digest=$(docker buildx imagetools inspect "$IMAGE:beta-$RUN_ID" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          ref="$IMAGE:beta-$RUN_ID@$digest"
+          mkdir -p dist
+          printf '%s\n' "$ref" > dist/image.txt
+          python3 deployment/package.py umbrel --image "$ref" --output dist/umbrel/paperclip-wallet
+          python3 deployment/package.py startos --image "$ref" --output dist/startos/paperclip-wallet
+          printf 'id: paperclip\nname: Paperclip Beta\n' > dist/umbrel/umbrel-app-store.yml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paperclip-beta-package-sources
+          path: dist
+          retention-days: 30

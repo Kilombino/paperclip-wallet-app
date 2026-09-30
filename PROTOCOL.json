@@ -1,0 +1,15 @@
+{
+  "profile": "paperclip-xbt-funded-v2",
+  "network": "regtest by default; XBT mainnet with PAPERCLIP_XBT_MAINNET=1",
+  "unified_sighash": true,
+  "mempooltruc": "reject supported; no TRUC dependency",
+  "subdustfeepenalty": "default",
+  "default_policy_full_lifecycle": false,
+  "exit_profile": 2,
+  "mainnet_transaction_validated": false,
+  "transaction_version": 2,
+  "vtxo_encoding_version": 4,
+  "anchor": "P2WSH OP_TRUE, funded, anyone-can-spend",
+  "upstream_base_commit": "e107d09e7fd173fc5895a2b9eec500082f48d4cd",
+  "shared_manifest_sha256": "ce1f1fb26b3205365aec889c759919f911f6d7579ae0dcc9e14ad4a0371f47fb"
+}

@@ -1,0 +1,12 @@
+.git
+target
+.state
+.env
+**/*.cookie
+**/auth_token
+**/mnemonic
+**/*.sqlite*
+**/debug.log
+result
+__pycache__
+*.pyc

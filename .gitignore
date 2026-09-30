@@ -1,0 +1,10 @@
+/target/
+/result*
+/.direnv/
+/.state/
+/test/
+*.log
+.env
+*.cookie
+__pycache__/
+*.pyc
