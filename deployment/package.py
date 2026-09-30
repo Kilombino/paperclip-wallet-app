@@ -22,6 +22,9 @@ def package(platform, image, destination, app='paperclip-wallet'):
     out = Path(destination)
     out.mkdir(parents=True, exist_ok=False)
     if platform == 'umbrel':
+        (out / 'hooks').mkdir()
+        shutil.copyfile(root / 'deployment/umbrel-pre-start', out / 'hooks/pre-start')
+        (out / 'hooks/pre-start').chmod(0o755)
         write(out / 'umbrel-app.yml', {
             'manifestVersion': 1, 'id': app, 'name': 'Paperclip Wallet Beta', 'tagline': 'On-chain, Ark, and Lightning for XBT',
             'category': 'bitcoin', 'version': '0.7.1', 'port': 38180,
