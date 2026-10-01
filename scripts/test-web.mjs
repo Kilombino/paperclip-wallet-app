@@ -160,3 +160,7 @@ console.log('PASS: authenticated first-run setup, platform password, explicit ba
   assert.equal(f.element('activity-summary').textContent, '');
 }
 console.log('PASS: readable empty activity, unknown payment, and lock clears review state');
+
+assert(!/[\u00c2\u00c3\ufffd]/u.test(source + html), 'Text assets must not contain mojibake');
+assert(!/[^\x00-\x7f]/.test(source), 'Use Unicode escapes in JavaScript to avoid encoding conversion');
+console.log('PASS: UI text encoding');

@@ -50,7 +50,7 @@ async function connectWallet() {
     lightningEnabled = info.lightning_enabled === true;
     $('ln-controls').disabled = !lightningEnabled;
     $('ln-capability').textContent = lightningEnabled ? 'Experimental XBT Lightning enabled. Channel and Ark pool liquidity are required. Recovery reserves are included in your payment cost.' : 'This ASP has not enabled funded Lightning. Payment controls are unavailable.';
-    $('network').textContent = network === 'bitcoin' ? 'XBT MAINNET Â· EXPERIMENTAL' : 'XBT REGTEST';
+    $('network').textContent = network === 'bitcoin' ? 'XBT MAINNET \u00b7 EXPERIMENTAL' : 'XBT REGTEST';
     await update();
     $('setup').hidden = true; $('login').hidden = true; $('wallet').hidden = false;
     $('submission-warning').hidden = !uncertainMutation;
@@ -152,7 +152,7 @@ $('ln-pay').onsubmit = event => { event.preventDefault(); run(event.submitter, a
   if (!lightningEnabled) throw new Error('Lightning is not enabled in this wallet recovery profile.');
   const destination = $('ln-destination').value.trim(), amount = sats('ln-amount', true);
   if (!destination) throw new Error('Enter an XBT Lightning request.');
-  if (!confirm('Pay ' + (amount === null ? 'the invoice amount' : amount.toLocaleString() + ' sats') + ' from Ark on ' + network + '?\n' + destination + '\n\nService fees plus 4,000â€“6,000 sats of recovery reserves per input apply. Failed payments may also consume refund reserves.')) return;
+  if (!confirm('Pay ' + (amount === null ? 'the invoice amount' : amount.toLocaleString() + ' sats') + ' from Ark on ' + network + '?\n' + destination + '\n\nService fees plus 4,000\u20136,000 sats of recovery reserves per input apply. Failed payments may also consume refund reserves.')) return;
   const result = await mutate('lightning/pay', {destination, amount_sat: amount, comment: null});
   $('ln-result').textContent = JSON.stringify(result, null, 2);
   paymentSummary('Submitted', 'Payment submitted once. Check Sent status before trying again.');
@@ -226,7 +226,7 @@ $('exit-claim').onclick = event => run(event.target, async () => {
 
 function paymentSummary(title, detail) {
   const box = $('payment-summary'); box.hidden = false;
-  box.textContent = title.replaceAll('_', ' ') + ' â€” ' + detail;
+  box.textContent = title.replaceAll('_', ' ') + ' \u2014 ' + detail;
 }
 $('ln-copy').onclick = event => run(event.target, async () => {
   await navigator.clipboard.writeText($('ln-invoice').textContent); status('Invoice copied.');
@@ -234,18 +234,18 @@ $('ln-copy').onclick = event => run(event.target, async () => {
 function renderActivity(records) {
   const list = $('activity-list'); list.replaceChildren();
   const rows = Array.isArray(records) ? records : [];
-  $('activity-summary').textContent = rows.length + ' Ark movements Â· ' + rows.filter(r => r.status === 'pending').length + ' pending';
+  $('activity-summary').textContent = rows.length + ' Ark movements \u00b7 ' + rows.filter(r => r.status === 'pending').length + ' pending';
   if (!rows.length) { list.textContent = 'No Ark activity yet. Deposits and payments will appear here.'; return; }
   for (const row of rows) {
     const card = document.createElement('article'); card.className = 'activity-row';
     const amount = Number.isSafeInteger(row.effective_balance_sat) ? row.effective_balance_sat : null;
     const heading = document.createElement('strong');
-    heading.textContent = ({'bark.arkoor':'Ark transfer','bark.lightning_send':'Lightning','bark.lightning_receive':'Lightning','bark.board':'Board','bark.round':'Round'}[row.subsystem?.name] || row.subsystem?.name || 'Ark') + ' Â· ' + (row.subsystem?.kind || 'Movement');
+    heading.textContent = ({'bark.arkoor':'Ark transfer','bark.lightning_send':'Lightning','bark.lightning_receive':'Lightning','bark.board':'Board','bark.round':'Round'}[row.subsystem?.name] || row.subsystem?.name || 'Ark') + ' \u00b7 ' + (row.subsystem?.kind || 'Movement');
     const value = document.createElement('span'); value.className = amount > 0 ? 'positive' : 'amount';
     value.textContent = amount === null ? 'Amount unavailable' : (amount > 0 ? '+' : '') + amount.toLocaleString() + ' sats';
     const detail = document.createElement('p');
     const date = new Date(row.time?.created_at);
-    detail.textContent = (row.status || 'Unknown') + ' Â· ' + (Number.isFinite(date.getTime()) ? date.toLocaleString() : 'Time unavailable') + ' Â· Fee: ' + (Number.isSafeInteger(row.offchain_fee_sat) ? row.offchain_fee_sat.toLocaleString() + ' sats' : 'unavailable');
+    detail.textContent = (row.status || 'Unknown') + ' \u00b7 ' + (Number.isFinite(date.getTime()) ? date.toLocaleString() : 'Time unavailable') + ' \u00b7 Fee: ' + (Number.isSafeInteger(row.offchain_fee_sat) ? row.offchain_fee_sat.toLocaleString() + ' sats' : 'unavailable');
     card.append(heading, value, detail); list.append(card);
   }
 }
@@ -274,13 +274,13 @@ setInterval(async () => {
   if (!token || !network || $('wallet').hidden || document.hidden || refreshing) return;
   refreshing = true;
   try { await update(); $('refresh-state').textContent = 'Updated ' + new Date().toLocaleTimeString(); }
-  catch { $('refresh-state').textContent = 'Update unavailable Â· retry with Update'; }
+  catch { $('refresh-state').textContent = 'Update unavailable \u00b7 retry with Update'; }
   finally { refreshing = false; }
 }, 30000);
 (async () => {
   const saved = sessionRead('paperclip.session'); if (!saved) return;
   token = saved; $('remember-session').checked = true;
-  status('Restoring this tabâ€™s wallet sessionâ€¦');
+  status('Restoring this tab\u2019s wallet session\u2026');
   try { await connectWallet(); }
   catch { token = ''; network = null; sessionWrite('paperclip.session', null); status('Unlock again to reconnect. Your wallet data is unchanged.'); }
 })();
