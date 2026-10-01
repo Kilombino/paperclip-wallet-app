@@ -27,7 +27,7 @@ def package(platform, image, destination, app='paperclip-wallet'):
         (out / 'hooks/pre-start').chmod(0o755)
         write(out / 'umbrel-app.yml', {
             'manifestVersion': 1, 'id': app, 'name': 'Paperclip Wallet Beta', 'tagline': 'On-chain, Ark, and Lightning for XBT',
-            'category': 'bitcoin', 'version': '0.7.6', 'port': 38180,
+            'category': 'bitcoin', 'version': '0.7.7', 'port': 38180,
             'description': 'Beta XBT wallet preset to https://ark.paperclippool.xyz. Configure your compatible XBT blockchain backend. Check live service status before funding. Back up the complete wallet.',
             'developer': 'Paperclip', 'website': 'https://github.com/connorslab/paperclip-wallet-app',
             'repo': 'https://github.com/connorslab/paperclip-wallet-app',
@@ -47,7 +47,7 @@ def package(platform, image, destination, app='paperclip-wallet'):
         (out / 'data/.gitkeep').touch()
     elif platform == 'startos':
         manifest = {
-            'id': app, 'title': 'Paperclip Wallet Beta', 'version': '0.7.6.0', 'license': 'MIT',
+            'id': app, 'title': 'Paperclip Wallet Beta', 'version': '0.7.7.0', 'license': 'MIT',
             'release-notes': 'Beta package for StartOS 0.3.5 only. Paperclip server preset. Not compatible with StartOS 0.4.',
             'wrapper-repo': 'https://github.com/connorslab/paperclip-wallet-app',
             'upstream-repo': 'https://github.com/connorslab/paperclip-wallet-app',

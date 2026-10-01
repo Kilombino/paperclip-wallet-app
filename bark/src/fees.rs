@@ -16,7 +16,7 @@ use crate::vtxo::selection::InputSelection;
 pub struct FeeEstimate {
 	/// The total amount including fees.
 	pub gross_amount: Amount,
-	/// The fee amount charged by the server.
+	/// The additional cost. For funded Ark sends this includes the recovery reserve.
 	pub fee: Amount,
 	/// The amount excluding fees. For sends, this is the amount the recipient
 	/// receives. For receives, this is the amount the user gets.
@@ -68,21 +68,33 @@ impl Wallet {
 		Ok(FeeEstimate::new(board_amount, fee, net_amount, vec![]))
 	}
 
-	/// Estimate fees for an arkoor payment operation. Currently, this is a no-op as the server
-	/// does not charge any fees for arkoor payments.
+	/// Estimate the recovery reserve using the same input selection and package builder as a send.
+	/// This does not lock inputs, store keys, or request signatures. Selection errors propagate.
 	pub async fn estimate_arkoor_payment_fee(&self, amount: Amount) -> anyhow::Result<FeeEstimate> {
-		let zero_fee = Amount::ZERO;
-		let inputs = match self.select_any_vtxos_to_cover(amount).await {
-			Ok(inputs) => inputs,
-			Err(_) => {
-				// We choose to ignore every error, even those which are not due to insufficient
-				// funds.
-				vec![]
-			},
-		};
+		let (change, _) = self.peek_next_keypair().await?;
+		let policy = ark::VtxoPolicy::new_pubkey(change.public_key());
+		let (inputs, reserve) = self.plan_arkoor_payment(amount, policy, change.public_key()).await?;
+		Ok(FeeEstimate::new(
+			amount.checked_add(reserve).context("payment amount overflow")?, reserve, amount,
+			inputs.iter().map(|v| v.id()).collect(),
+		))
+	}
 
-		let vtxo_ids = inputs.into_iter().map(|v| v.id()).collect();
-		Ok(FeeEstimate::new(amount, zero_fee, amount, vtxo_ids))
+	/// Validate the destination and estimate an Ark send without changing wallet state.
+	pub async fn estimate_arkoor_send(
+		&self, destination: &ark::Address, amount: Amount,
+	) -> anyhow::Result<FeeEstimate> {
+		self.validate_arkoor_address(destination).await?;
+		let (change, _) = self.peek_next_keypair().await?;
+		ensure!(destination.policy().user_pubkey() != change.public_key(),
+			"Cannot create arkoor to same address as change");
+		let (inputs, reserve) = self.plan_arkoor_payment(
+			amount, destination.policy().clone(), change.public_key(),
+		).await?;
+		Ok(FeeEstimate::new(
+			amount.checked_add(reserve).context("payment amount overflow")?, reserve, amount,
+			inputs.iter().map(|v| v.id()).collect(),
+		))
 	}
 
 	/// Estimate fees for a lightning receive operation. `FeeEstimate::gross_amount` is the

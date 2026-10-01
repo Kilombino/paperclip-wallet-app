@@ -735,7 +735,9 @@ pub async fn send(
 			wallet.validate_arkoor_address(&addr).await
 				.badarg("invalid arkoor address")?;
 			log::info!("Sending arkoor payment of {} to address {}", amount, addr);
-			wallet.send_arkoor_payment(&addr, amount).await?;
+			wallet.send_arkoor_payment_with_max_cost(
+				&addr, amount, body.max_total_sat.map(Amount::from_sat),
+			).await?;
 			return Ok(axum::Json(bark_json::web::SendResponse {
 				message: "Payment sent successfully".to_string(),
 				payment_hash: None,
@@ -746,6 +748,8 @@ pub async fn send(
 		// Ignore other errors, we want to check payment methods below
 		Err(_) => {}
 	};
+
+	if body.max_total_sat.is_some() { badarg!("max_total_sat is supported for Ark sends only"); }
 
 	let invoice = if let Ok(inv) = Bolt11Invoice::from_str(&body.destination) {
 		if body.comment.is_some() {

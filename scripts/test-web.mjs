@@ -20,6 +20,7 @@ function fixture(network, lightningEnabled = true, empty = false) {
       if (failPath && path.endsWith(failPath)) throw Error('Transport interrupted');
       const result = path.endsWith('/wallet') ? {fingerprint: empty ? null : 'test-fingerprint'}
         : path.endsWith('/wallet/identity') ? {network, exit_profile: 2, lightning_enabled: lightningEnabled}
+        : path.endsWith('/fees/ark/send') ? {recipient_amount_sat: JSON.parse(options.body).amount_sat, recovery_reserve_sat: 6000, service_fee_sat: 0, total_debit_sat: JSON.parse(options.body).amount_sat + 6000, remaining_spendable_sat: 92000, input_count: 1, vtxos_spent: ['test-vtxo']}
         : path.endsWith('/wallet/balance') ? {spendable_sat: 100000}
         : path.endsWith('/onchain/balance') ? {confirmed_sat: 50000}
         : path.endsWith('/addresses/next') ? {address: 'bc1-test-address'}
@@ -173,3 +174,46 @@ console.log('PASS: UI text encoding');
   assert.match(f.element('vtxo-tip').textContent,/unavailable/);
 }
 console.log('PASS: VTXO chain height and unavailable-tip handling');
+
+for (const mode of ['cancel', 'estimate-error', 'approve', 'malformed']) {
+  const f = fixture('bitcoin');
+  f.element('token').value = 'test-token'; await f.trigger('unlock', 'submit');
+  f.element('destination').value = 'ark1-recipient'; f.element('amount').value = '2000';
+  let confirmation = '';
+  f.context.confirm = text => { confirmation = text; return mode !== 'cancel'; };
+  if (mode === 'estimate-error') f.fail('/fees/ark/send');
+  if (mode === 'malformed') {
+    const fetch = f.context.fetch;
+    f.context.fetch = async (path, options) => path.endsWith('/fees/ark/send')
+      ? {ok:true, status:200, json:async () => ({recipient_amount_sat:2000, total_debit_sat:2000})} : fetch(path, options);
+  }
+  await f.trigger('send', 'submit');
+  const sends = f.calls.filter(c => c.path.endsWith('/wallet/send'));
+  assert.equal(sends.length, mode === 'approve' ? 1 : 0);
+  if (mode === 'approve' || mode === 'cancel') {
+    assert.match(confirmation, /Recovery reserve: 6,000 sats/);
+    assert.match(confirmation, /Total balance reduction: 8,000 sats/);
+    assert.match(confirmation, /not separately refundable/);
+  }
+  if (mode === 'approve') assert.equal(JSON.parse(sends[0].options.body).max_total_sat, 8000);
+  if (mode === 'estimate-error') assert.equal(vm.runInContext('uncertainMutation', f.context), false);
+}
+console.log('PASS: Ark cost review, cancellation, failed or malformed estimates, and approved debit cap');
+
+for (const change of ['destination', 'lock']) {
+  const f = fixture('bitcoin');
+  f.element('token').value = 'test-token'; await f.trigger('unlock', 'submit');
+  f.element('destination').value = 'ark1-recipient'; f.element('amount').value = '2000';
+  const fetch = f.context.fetch;
+  f.context.fetch = async (path, options) => {
+    const result = await fetch(path, options);
+    if (path.endsWith('/fees/ark/send')) {
+      if (change === 'lock') await f.trigger('lock');
+      else f.element('destination').value = 'ark1-changed';
+    }
+    return result;
+  };
+  await f.trigger('send', 'submit');
+  assert(!f.calls.some(c => c.path.endsWith('/wallet/send')), 'Stale estimate must not send');
+}
+console.log('PASS: edited destination and locked wallet invalidate an in-flight estimate');

@@ -34,6 +34,14 @@ Payments or change below 1,330 sats are refused. Some fragmented input sets
 require a refresh before payment. No recipient amount is silently reduced to
 make an allocation fit.
 
+## Cost estimates
+
+The authenticated wallet API provides `POST /api/v1/fees/ark/send`. It returns
+an input-specific recovery reserve and total debit before payment. The estimate
+uses the send planner and propagates insufficient-funds or refresh errors.
+The wallet UI requires a cost review and caps the approved debit with
+`max_total_sat`. See the README for the request and response fields.
+
 ## Recovery
 
 Keep a private backup of the complete wallet directory. It includes the signed
