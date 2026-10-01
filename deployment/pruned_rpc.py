@@ -51,15 +51,36 @@ class Node:
         data = rpc_json({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': list(params)}).encode()
         request = urllib.request.Request(self.url, data, {
             'Authorization': 'Basic ' + token, 'Content-Type': 'application/json'})
-        try:
-            response = urllib.request.urlopen(request, timeout=20)
-        except urllib.error.HTTPError as error:
-            response = error
-        with response:
-            value = json.load(response, parse_float=Decimal)
-        if value.get('error'):
-            raise RpcError(value['error']['code'], value['error']['message'])
-        return value['result']
+        # Retry only read-only fee lookups; never replay a broadcast here.
+        attempts = 3 if method == 'estimatesmartfee' else 1
+        for attempt in range(attempts):
+            try:
+                response = urllib.request.urlopen(request, timeout=20)
+            except urllib.error.HTTPError as error:
+                response = error
+            except (urllib.error.URLError, TimeoutError) as error:
+                raise RpcError(-28, 'Upstream chain RPC unavailable') from error
+            with response:
+                if response.status in (429, 502, 503, 504):
+                    if attempt + 1 < attempts:
+                        time.sleep(0.1 * (2 ** attempt))
+                        continue
+                    raise RpcError(-28, 'Upstream chain RPC busy; retry shortly')
+                try:
+                    value = json.load(response, parse_float=Decimal)
+                except (ValueError, UnicodeError) as error:
+                    raise RpcError(-28, 'Invalid upstream chain RPC response') from error
+            if not isinstance(value, dict):
+                raise RpcError(-28, 'Invalid upstream chain RPC response')
+            if value.get('error'):
+                error = value['error']
+                if not isinstance(error, dict) or not isinstance(error.get('code'), int):
+                    raise RpcError(-28, 'Invalid upstream chain RPC error')
+                raise RpcError(error['code'], str(error.get('message', 'RPC error')))
+            if 'result' not in value:
+                raise RpcError(-28, 'Missing upstream chain RPC result')
+            return value['result']
+
 
 
 class Index:

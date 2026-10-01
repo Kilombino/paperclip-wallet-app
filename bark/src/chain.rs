@@ -378,8 +378,8 @@ impl ChainSource {
 				};
 				Ok(FeeRates {
 					fast: get_fee_rate(FEE_RATE_TARGET_CONF_FAST).await?,
-					regular: get_fee_rate(FEE_RATE_TARGET_CONF_REGULAR).await.expect("should exist"),
-					slow: get_fee_rate(FEE_RATE_TARGET_CONF_SLOW).await.expect("should exist"),
+					regular: get_fee_rate(FEE_RATE_TARGET_CONF_REGULAR).await?,
+					slow: get_fee_rate(FEE_RATE_TARGET_CONF_SLOW).await?,
 				})
 			},
 			ChainSourceClient::Esplora(client) => {

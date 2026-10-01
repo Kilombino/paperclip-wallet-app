@@ -8,6 +8,8 @@ import base64
 import json
 from decimal import Decimal
 import unittest
+from unittest.mock import patch
+import io
 
 spec = importlib.util.spec_from_file_location('pruned', Path(__file__).with_name('pruned_rpc.py'))
 module = importlib.util.module_from_spec(spec)
@@ -53,6 +55,54 @@ class Node:
         if method == 'decoderawtransaction':
             return {'txid': args[0], 'vin': [{'txid': 't1' if args[0] == 'child' else 'unknown'}]}
         raise AssertionError(method)
+
+
+class TransportTests(unittest.TestCase):
+    def response(self, body, status=200):
+        response = io.BytesIO(body)
+        response.status = status
+        return response
+
+    def call(self, responses, method='estimatesmartfee'):
+        with tempfile.TemporaryDirectory() as directory:
+            cookie = Path(directory) / 'cookie'
+            cookie.write_text('user:password')
+            with patch.object(module.urllib.request, 'urlopen', side_effect=responses) as request:
+                with patch.object(module.time, 'sleep'):
+                    result = module.Node('http://localhost', cookie).call(method, [3])
+                return result, request.call_count
+
+    def test_busy_fee_query_retries_and_keeps_exact_amount(self):
+        result, count = self.call([
+            self.response(b'<html>busy</html>', 503),
+            self.response(b'{"result":{"feerate":0.00001000},"error":null}'),
+        ])
+        self.assertEqual(result['feerate'], Decimal('0.00001000'))
+        self.assertEqual(count, 2)
+
+    def test_exhausted_busy_query_is_unavailable_not_invalid_request(self):
+        with self.assertRaises(module.RpcError) as error:
+            self.call([self.response(b'busy', 503) for _ in range(3)])
+        self.assertEqual(error.exception.code, -28)
+
+    def test_broadcast_is_never_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cookie = Path(directory) / 'cookie'
+            cookie.write_text('user:password')
+            with patch.object(module.urllib.request, 'urlopen', return_value=self.response(b'busy', 503)) as request:
+                with self.assertRaises(module.RpcError):
+                    module.Node('http://localhost', cookie).call('sendrawtransaction', ['00'])
+                self.assertEqual(request.call_count, 1)
+
+    def test_html_upstream_failure_is_unavailable(self):
+        with self.assertRaises(module.RpcError) as error:
+            self.call([self.response(b'<html>error</html>', 500)])
+        self.assertEqual(error.exception.code, -28)
+
+    def test_upstream_rpc_errors_are_preserved(self):
+        with self.assertRaises(module.RpcError) as error:
+            self.call([self.response(b'{"result":null,"error":{"code":-5,"message":"missing"}}', 500)])
+        self.assertEqual(error.exception.code, -5)
 
 
 class PrunedTests(unittest.TestCase):
