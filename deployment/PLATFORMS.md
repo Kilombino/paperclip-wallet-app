@@ -1,6 +1,12 @@
 # Paperclip Wallet on Umbrel and StartOS
 
-These are beta package sources. Image builds and package verification are required before installation.
+Paperclip Ark is open in public beta. Use wallet 0.7.4 or later.
+Native amd64 and arm64 images pass startup checks. Umbrel 0.7.4 is deployed
+and healthy. StartOS 0.4 installer builds and manifests are verified; device
+setup and backup/restore tests remain in progress.
+
+Install from the [Umbrel community store](https://github.com/connorslab/paperclip-umbrel-app-store)
+or the [StartOS 0.4 release](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.7.4-beta.1).
 The source container targets Linux amd64 and arm64. Current StartOS 0.4 packages use https://github.com/connorslab/paperclip-wallet-startos. The generator below retains a legacy 0.3.5 wrapper for reference; it is not the 0.4 package.
 
 ## Setup
@@ -45,9 +51,26 @@ Do not run two instances from the same backup. The setup form deliberately
 does not overwrite an existing wallet or import a seed as a substitute for
 a full recovery backup. Live platform backup consistency still needs testing.
 
-Lightning controls activate only when the connected server advertises funded Lightning. The production Paperclip server is not active yet.
+Lightning controls activate only when the connected server advertises funded Lightning. The production Paperclip server enables funded Lightning in beta, with a
+50,000-sat payment limit. Fees, reserves, and funded-HTLC minimums apply.
 The wallet uses the ASP's Lightning service; users do not need their own CLN.
 Paul Lamb's Lightning Fork is LND-based and needs a separate ASP adapter.
+
+## RPC connection troubleshooting
+
+Use an address reachable from the wallet service. A Docker service name on
+Umbrel does not resolve on a separate StartOS device. For a separate device,
+use the Knots host LAN address and its configured RPC port. Do not assume the
+SHA-256 BTC default port; some XBT nodes use 9332.
+
+- Name lookup failure: check the hostname or use the host LAN address.
+- Connection refused: check the RPC port, listener, and container port mapping.
+- HTTP 403: check the node RPC allowlist. Permit only the wallet device address,
+  for example `rpcallowip=192.168.1.111/32`, and retain existing entries. Apply
+  changes through the node configuration and restart it as required.
+- HTTP 401: check the RPC username and password.
+
+Keep RPC private. Do not use a public allowlist to resolve a connection error.
 
 ## Build beta packages
 

@@ -4,8 +4,12 @@ A self-hosted Bitcoin Blake2b (XBT) wallet based on Bark by Second and the Bark
 contributors. This edition presets new wallets to **https://ark.paperclippool.xyz**.
 Existing wallet configuration is preserved. Wallet keys stay on your device.
 
-**Beta. The production Paperclip Ark server is not open for deposits yet.**
-See [service status](https://ark.paperclippool.xyz/) before funding.
+**Public beta. Paperclip Ark is open for XBT deposits, Ark transfers, and Lightning payments.**
+Use wallet **0.7.4 or later**. Check [service status](https://ark.paperclippool.xyz/) before funding.
+
+Current beta limits: boarding starts at **20,000 sats**; Lightning payments are
+limited to **50,000 sats**. Fees and recovery reserves apply. Very small Lightning
+payments can be below the funded-HTLC minimum. The server can change these limits.
 
 ## Features
 
@@ -27,12 +31,22 @@ See [wallet apps](https://ark.paperclippool.xyz/wallet/) and the
 container digests. A source wrapper is not an install-tested binary release.
 The [StartOS 0.4 wrapper](https://github.com/connorslab/paperclip-wallet-startos) is separate. The legacy 0.3.5 generator is not the current release target.
 
+Current releases:
+
+- [Umbrel community store](https://github.com/connorslab/paperclip-umbrel-app-store): wallet 0.7.4, with a pinned image.
+- [StartOS 0.4 installers](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.7.4-beta.1): x86-64 and ARM64 beta packages.
+
 See [platform instructions](deployment/PLATFORMS.md) for authentication,
 backend setup, packaging, and restore requirements.
 
 ## Build
 
+Umbrel and StartOS are optional. On a compatible Linux build host with Git and
+Nix installed, clone this repository and build the CLI and web daemon:
+
 ```sh
+git clone https://github.com/connorslab/paperclip-wallet-app.git
+cd paperclip-wallet-app
 nix develop --command bash scripts/build.sh
 ./target/debug/paperclip-wallet --help
 ./target/debug/paperclip-walletd --help
@@ -41,6 +55,19 @@ nix develop --command bash scripts/build.sh
 The Docker build uses `deployment/Dockerfile`. Release builds run natively for
 amd64 and arm64. The default server applies only to new wallet setup. The daemon
 retains explicit network selection and mainnet opt-in outside platform packages.
+
+## Verification status
+
+Native amd64 and arm64 images pass startup checks. Umbrel 0.7.4 is deployed
+and healthy. StartOS 0.4 packages build and pass manifest validation; device
+setup and backup/restore verification remain in progress.
+
+Mainnet tests passed for boarding, refresh, Ark transfer, BOLT11 send and
+receive, BOLT12 send, cooperative withdrawal, and balance persistence after
+restart. A refused receive cancellation preserves its recovery checkpoint.
+The launch relies on prior emergency-exit tests; a new 144-block production
+emergency exit was not repeated. These checks do not establish compatibility
+with every device or node implementation.
 
 ## Recovery
 
