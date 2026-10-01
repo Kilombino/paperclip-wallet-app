@@ -278,8 +278,8 @@ pub async fn offboard_fee(
 	),
 	description = "Estimates the fee for sending the specified amount over Lightning. The net \
 		amount is what the recipient receives. The fee depends on the VTXOs selected and \
-		their expiry. If the wallet has insufficient funds, returns a worst-case fee \
-		estimate assuming the user acquires enough funds to cover the payment.",
+		their expiry, and includes funded recovery reserves. Uses the same transaction-builder \
+		validation as payment submission. Returns an error when no usable input combination is found.",
 	tag = "fees"
 )]
 #[debug_handler]

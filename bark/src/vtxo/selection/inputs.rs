@@ -93,6 +93,43 @@ impl<F> InputSelection<F> {
 }
 
 impl InputSelection {
+	/// Eligible inputs in expiry order, with the same exclusions as ordinary selection.
+	pub(crate) fn eligible(&self, candidates: Vec<WalletVtxo>) -> Vec<WalletVtxo> {
+		InputScanner::new(self, candidates).candidates
+	}
+
+	/// Prefer a constructible single input, then bounded multi-input candidates.
+	/// Validation must be read-only. A rejected shape returns None; operational errors propagate.
+	pub(crate) fn select_constructible<T>(
+		&self, candidates: Vec<WalletVtxo>, mut validate: impl FnMut(&[WalletVtxo]) -> anyhow::Result<Option<T>>,
+	) -> anyhow::Result<(Vec<WalletVtxo>, T)> {
+		let candidates = self.eligible(candidates);
+		let max_inputs = self.max_inputs.unwrap_or(candidates.len()).min(candidates.len());
+		ensure!(max_inputs > 0, "No eligible Ark inputs; refresh or add Ark funds");
+		for input in &candidates {
+			if let Some(plan) = validate(slice::from_ref(input))? { return Ok((vec![input.clone()], plan)); }
+		}
+		// Try expiry order and largest-first, including alternate starting inputs. Bound
+		// the combinatorial search rather than blocking a wallet with many tiny inputs.
+		for largest_first in [false, true] {
+			let mut attempts = 0;
+			let mut ordered = candidates.clone();
+			if largest_first { ordered.sort_by_key(|v| cmp::Reverse(v.amount())); }
+			for start in 0..ordered.len().min(64) {
+				let mut selected = vec![ordered[start].clone()];
+				for next in ordered.iter().skip(start + 1) {
+					if selected.len() >= max_inputs { break; }
+					selected.push(next.clone());
+					attempts += 1;
+					if let Some(plan) = validate(&selected)? { return Ok((selected, plan)); }
+					if attempts >= 2048 { break; }
+				}
+				if attempts >= 2048 { break; }
+			}
+		}
+		bail!("No constructible Lightning input combination found after fees and recovery reserves; refresh or consolidate eligible Ark inputs, or add Ark funds")
+	}
+
 	/// Create a new [InputSelection] with no input limit, no exclusions, and no fee scheme.
 	pub fn new() -> InputSelection {
 		Default::default()
@@ -365,6 +402,11 @@ mod test {
 	use bitcoin::Weight;
 
 	use ark::test_util::dummy::DummyTestVtxoSpec;
+	use ark::arkoor::{ArkoorConstructionError, ArkoorDestination};
+	use ark::arkoor::package::ArkoorPackageBuilder;
+	use ark::board::BoardBuilder;
+	use ark::{Vtxo, VtxoPolicy};
+	use ark::vtxo::Full;
 
 	use crate::vtxo::state::VtxoState;
 
@@ -393,6 +435,84 @@ mod test {
 
 	fn amounts(vtxos: &[WalletVtxo]) -> Vec<u64> {
 		vtxos.iter().map(|v| v.amount().to_sat()).collect()
+	}
+
+	fn funded_input(sats: u64, expiry: u32) -> (WalletVtxo, Vtxo<Full>) {
+		let spec = DummyTestVtxoSpec { expiry_height: BlockHeight::new(expiry), ..Default::default() };
+		let (mut funding, old) = spec.build();
+		let profile = ark::exit_policy::paperclip_funding();
+		let amount = Amount::from_sat(sats) + profile.per_transaction();
+		funding.output[0].value = amount;
+		let point = bitcoin::OutPoint::new(funding.compute_txid(), 0);
+		let builder = BoardBuilder::new(spec.user_keypair.public_key(), old.expiry_height(),
+			spec.server_keypair.public_key(), old.exit_delta()).with_exit_format(profile.format())
+			.set_funded_funding_details(amount, profile.anchor(), profile.miner_fee(), point)
+			.unwrap().generate_user_nonces();
+		let server = BoardBuilder::new_for_standard_cosign(spec.user_keypair.public_key(), old.expiry_height(),
+			spec.server_keypair.public_key(), old.exit_delta(), amount, profile.anchor(), profile.miner_fee(),
+			point, *builder.user_pub_nonce()).unwrap();
+		let full = builder.build_vtxo(&server.server_cosign(&spec.server_keypair), &spec.user_keypair).unwrap();
+		let wallet = WalletVtxo { vtxo: full.clone().into_bare(), state: VtxoState::Spendable,
+			exit_depth: 0, exit_tx_weight: Weight::ZERO, registered: false };
+		(wallet, full)
+	}
+
+	#[test]
+	fn constructible_lightning_real_builder_regressions() {
+		let key = DummyTestVtxoSpec::default().user_keypair.public_key();
+		let destination = ArkoorDestination { total_amount: Amount::from_sat(50_000),
+			policy: VtxoPolicy::new_server_htlc_send(key, ark::lightning::Preimage::random().into(), BlockHeight::new(400)) };
+		for (amounts_sat, expected) in [
+			(vec![45_800, 10_000, 84_805], Some(vec![84_805])),
+			(vec![55_000, 84_805], Some(vec![84_805])), // unusable change on first input
+			(vec![34_000, 35_000], Some(vec![34_000, 35_000])),
+			(vec![10_000, 11_000], None),
+		] {
+			let inputs = amounts_sat.iter().enumerate().map(|(i, sats)| funded_input(*sats, 1000 + i as u32))
+				.collect::<Vec<_>>();
+			let result = InputSelection::new().select_constructible(inputs.iter().map(|(v, _)| v.clone()).collect(), |chosen| {
+				let full = chosen.iter().map(|v| inputs.iter().find(|(w, _)| w.id() == v.id()).unwrap().1.clone()).collect();
+				match ArkoorPackageBuilder::new_funded_lightning_send(full, destination.clone(), VtxoPolicy::new_pubkey(key)) {
+					Ok((_, reserve)) => Ok(Some(reserve)),
+					Err(ArkoorConstructionError::Dust | ArkoorConstructionError::Unbalanced { .. }) => Ok(None),
+					Err(e) => Err(e.into()),
+				}
+			});
+			match expected {
+				Some(expected) => {
+					let (chosen, reserve) = result.unwrap();
+					assert_eq!(amounts(&chosen), expected);
+					assert_eq!(reserve.to_sat(), if chosen.len() == 1 { 6000 } else { 10_000 });
+				},
+				None => assert!(result.is_err()),
+			}
+		}
+	}
+
+	#[test]
+	fn constructible_selection_skips_fragmented_prefix() {
+		let candidates = vec![dummy_wallet_vtxo(45_800, 100),
+			dummy_wallet_vtxo(84_805, 200), dummy_wallet_vtxo(10_000, 200)];
+		let (chosen, ()) = InputSelection::new().select_constructible(candidates, |inputs| {
+			Ok((inputs.len() == 1 && inputs[0].amount() >= Amount::from_sat(56_000)).then_some(()))
+		}).unwrap();
+		assert_eq!(amounts(&chosen), [84_805]);
+	}
+
+	#[test]
+	fn constructible_selection_respects_filters_and_propagates_errors() {
+		let expired = dummy_wallet_vtxo(100_000, 10);
+		let excluded = dummy_wallet_vtxo(100_000, 200);
+		let mut deep = dummy_wallet_vtxo(100_000, 300);
+		deep.exit_depth = 5;
+		let selection = InputSelection::new().expires_after(BlockHeight::new(10))
+			.exclude(excluded.id()).max_exit_depth(5).max_inputs(1);
+		let candidates = vec![expired, excluded, deep, dummy_wallet_vtxo(10_000, 400)];
+		let error = selection.select_constructible(candidates, |inputs| -> anyhow::Result<Option<()>> {
+			assert_eq!(amounts(inputs), [10_000]);
+			bail!("ancestry unavailable")
+		}).unwrap_err();
+		assert_eq!(error.to_string(), "ancestry unavailable");
 	}
 
 	#[test]

@@ -123,37 +123,18 @@ impl Wallet {
 	/// Estimate fees for a lightning send operation. `FeeEstimate::net_amount` is the amount to be
 	/// paid to a given invoice/address.
 	///
-	/// Uses the same iterative approach as `make_lightning_payment` to account for
-	/// VTXO expiry-based fees.
-	///
-	/// If the wallet is lacking enough funds to send `amount` via lightning, then the estimate will
-	/// be the maximum possible fee, assuming the user acquires enough funds to cover the payment.
+	/// Uses the same builder-validated input selection as the actual send. Errors
+	/// are propagated rather than replaced by a hypothetical fee for an unbuildable payment.
 	pub async fn estimate_lightning_send_fee(&self, amount: Amount) -> anyhow::Result<FeeEstimate> {
-		let (_, ark_info) = self.require_server().await?;
-
-		let (inputs, fee) = match self.select_any_vtxos_to_cover_with_fee(
-			amount,
-			|a, v| {
-				let count = v.size_hint().0 as u64;
-				let fee = ark_info.fees.lightning_send.calculate(a, v).context("fee overflowed")?;
-				fee.checked_add(ark::exit_policy::paperclip_funding().per_transaction()
-					.checked_mul(3 * count).context("reserve overflow")?).context("fee overflow")
-			},
-		).await {
-			Ok((inputs, fee)) => (inputs, fee),
-			Err(_) => {
-				// We choose to ignore every error, even those which are not due to insufficient
-				// funds.
-				let info = [VtxoFeeInfo { amount, expiry_blocks: u32::MAX }];
-				let fee = ark_info.fees.lightning_send.calculate(amount, info)
-					.context("fee overflowed")?;
-				(Vec::new(), fee.checked_add(ark::exit_policy::paperclip_funding().per_transaction() * 3).context("fee overflow")?)
-			},
-		};
-		let total_cost = amount.checked_add(fee).unwrap_or(Amount::MAX);
-		let vtxo_ids = inputs.into_iter().map(|v| v.id()).collect();
-
-		Ok(FeeEstimate::new(total_cost, fee, amount, vtxo_ids))
+		let (_, info) = self.require_server().await?;
+		let tip = self.inner.chain.tip().await?;
+		let (key, _) = self.peek_next_keypair().await?;
+		let policy = ark::VtxoPolicy::new_server_htlc_send(key.public_key(),
+			ark::lightning::PaymentHash::from_byte_array([0; 32]), tip + info.htlc_send_expiry_delta);
+		let (inputs, fee, reserve) = self.plan_lightning_payment(amount, policy, key.public_key()).await?;
+		let fee = fee.checked_add(reserve).context("Lightning fee overflow")?;
+		let total = amount.checked_add(fee).context("payment amount overflow")?;
+		Ok(FeeEstimate::new(total, fee, amount, inputs.iter().map(|v| v.id()).collect()))
 	}
 
 	/// Estimate fees for an offboard operation. `FeeEstimate::net_amount` is the onchain amount the

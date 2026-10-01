@@ -11,6 +11,7 @@
 //! pattern-matches on progress and dispatches; persistence is the
 //! executor's job.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -19,7 +20,7 @@ use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Amount, SignedAmount};
 use log::{debug, error, info, trace, warn};
 
-use ark::arkoor::ArkoorDestination;
+use ark::arkoor::{ArkoorDestination, ArkoorConstructionError};
 use ark::arkoor::package::{ArkoorPackageBuilder, ArkoorPackageCosignResponse};
 use ark::lightning::{Invoice, PaymentHash, PaymentStatus, Preimage};
 use ark::mailbox::MailboxIdentifier;
@@ -28,7 +29,7 @@ use ark::{ProtocolEncoding, VtxoId, VtxoPolicy};
 use bitcoin_ext::BlockHeight;
 use server_rpc::protos::{self, lightning_payment_status};
 
-use crate::Wallet;
+use crate::{Wallet, WalletVtxo};
 use crate::actions::{Advance, AdvanceError, WalletAction, WalletActionId, park_with_backoff};
 
 use crate::movement::update::MovementUpdate;
@@ -316,6 +317,42 @@ pub struct Revocation {
 /// How long to sleep between poll attempts when the server reports `Pending`.
 const PAYMENT_PENDING_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
+impl Wallet {
+	/// Read-only selection shared by Lightning estimates and sends. The real builder
+	/// checks every HTLC fragment and change output before any input is locked.
+	pub(crate) async fn plan_lightning_payment(
+		&self, amount: Amount, policy: VtxoPolicy, change: PublicKey,
+	) -> anyhow::Result<(Vec<WalletVtxo>, Amount, Amount)> {
+		let (_, info) = self.require_server().await?;
+		ensure!(info.funded_lightning, "server has not enabled funded Lightning");
+		ensure!(amount > Amount::ZERO, "payment amount must be positive");
+		self.inner.chain.require_funded_policy().await?;
+		let tip = self.inner.chain.tip().await?;
+		let selection = self.spend_input_selection().await?.expires_after(tip);
+		let candidates = selection.eligible(self.spendable_vtxos().await?);
+		let ids = candidates.iter().map(|v| v.id()).collect::<Vec<_>>();
+		let full = self.inner.db.get_full_vtxos(&ids).await?.into_iter()
+			.map(|v| (v.id(), v)).collect::<HashMap<_, _>>();
+		let (inputs, (fee, reserve)) = selection.select_constructible(candidates, |inputs| {
+			let fee = info.fees.lightning_send.calculate(amount, inputs.iter()
+				.map(|v| ark::fees::VtxoFeeInfo::from_vtxo_and_tip(v, tip)))
+				.context("Lightning service fee overflow")?;
+			let total = amount.checked_add(fee).context("payment amount overflow")?;
+			let hydrated = inputs.iter().map(|v| full.get(&v.id()).cloned()
+				.context("Missing Lightning input ancestry")).collect::<anyhow::Result<Vec<_>>>()?;
+			match ArkoorPackageBuilder::new_funded_lightning_send(hydrated,
+				ArkoorDestination { total_amount: total, policy: policy.clone() },
+				VtxoPolicy::new_pubkey(change),
+			) {
+				Ok((_, reserve)) => Ok(Some((fee, reserve))),
+				Err(ArkoorConstructionError::Dust | ArkoorConstructionError::Unbalanced { .. }) => Ok(None),
+				Err(error) => Err(error.into()),
+			}
+		})?;
+		Ok((inputs, fee, reserve))
+	}
+}
+
 /// Build a fresh [`LightningSend`] in `Progress::Start`: pick inputs,
 /// lock them, derive the htlc key, snapshot expiry.
 ///
@@ -345,30 +382,15 @@ pub(crate) async fn start_lightning_send(
 		bail!("Cannot pay invoice for 0 sats (0 sat invoices are not any-amount invoices)");
 	}
 
-	wallet.inner.chain.require_funded_policy().await?;
-	let reserve = ark::exit_policy::paperclip_funding().per_transaction();
-	let (inputs, _) = wallet.select_any_vtxos_to_cover_with_fee(
+	let (preview_key, _) = wallet.peek_next_keypair().await?;
+	let htlc_expiry = tip + ark_info.htlc_send_expiry_delta;
+	let (inputs, fee, recovery_reserve) = wallet.plan_lightning_payment(
 		payment_amount,
-		|a, v| {
-			let count = v.size_hint().0 as u64;
-			let fee = ark_info.fees.lightning_send.calculate(a, v).context("fee overflowed")?;
-			fee.checked_add(reserve.checked_mul(3 * count).context("reserve overflow")?)
-				.context("payment fee overflow")
-		},
-	).await.context("Could not cover payment, service fee, and recovery reserves")?;
-	let fee = ark_info.fees.lightning_send.calculate(payment_amount, inputs.iter()
-		.map(|v| ark::fees::VtxoFeeInfo::from_vtxo_and_tip(v, tip))).context("fee overflowed")?;
+		VtxoPolicy::new_server_htlc_send(preview_key.public_key(), invoice.payment_hash(), htlc_expiry),
+		preview_key.public_key(),
+	).await?;
 	let (change_keypair, _) = wallet.derive_store_next_keypair().await?;
 	let (revocation_keypair, _) = wallet.derive_store_next_keypair().await?;
-	let htlc_expiry = tip + ark_info.htlc_send_expiry_delta;
-	let ids = inputs.iter().map(|v| v.id()).collect::<Vec<_>>();
-	let full = wallet.inner.db.get_full_vtxos(&ids).await?;
-	let (_, recovery_reserve) = ArkoorPackageBuilder::new_funded_lightning_send(
-		full, ArkoorDestination {
-			total_amount: payment_amount.checked_add(fee).context("payment overflow")?,
-			policy: VtxoPolicy::new_server_htlc_send(change_keypair.public_key(), invoice.payment_hash(), htlc_expiry),
-		}, VtxoPolicy::new_pubkey(change_keypair.public_key()),
-	).context("payment is below the funded-HTLC minimum or leaves dust change; use a larger amount or refresh inputs")?;
 	let action_id = ln_pay_action_id(invoice.payment_hash());
 	wallet.lock_vtxos(&inputs, Some(VtxoLockHolder::Action { id: action_id })).await?;
 
