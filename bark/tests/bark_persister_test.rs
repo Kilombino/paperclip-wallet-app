@@ -14,11 +14,10 @@ use bitcoin::bip32::Fingerprint;
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 use chrono::{DateTime, Local};
-use lightning_invoice::Bolt11Invoice;
 
 use ark::{ProtocolEncoding, Vtxo, VtxoId};
 use ark::vtxo::Full;
-use ark::lightning::{PaymentHash, Preimage};
+use ark::lightning::{Invoice, PaymentHash, Preimage};
 use bitcoin_ext::{BlockHeight, BlockRef};
 
 use bark::{WalletProperties, WalletVtxo};
@@ -192,7 +191,7 @@ impl BarkPersister for Dummy {
 		&self,
 		_payment_hash: PaymentHash,
 		_preimage: Preimage,
-		_invoice: &Bolt11Invoice,
+		_invoice: &Invoice,
 		_amount: bitcoin::Amount,
 	) -> anyhow::Result<()> {
 		Ok(())

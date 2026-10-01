@@ -14,13 +14,12 @@ use std::fmt;
 use bitcoin::{Amount, Transaction};
 use bitcoin::secp256k1::{Keypair, PublicKey};
 use bitcoin_ext::BlockHeight;
-use lightning_invoice::Bolt11Invoice;
 
 use ark::{Vtxo, VtxoId, VtxoPolicy, VtxoRequest};
 use ark::vtxo::Full;
 use ark::mailbox::MailboxIdentifier;
 use ark::tree::signed::{UnlockHash, VtxoTreeSpec};
-use ark::lightning::{PaymentHash, Preimage};
+use ark::lightning::{Invoice, PaymentHash, Preimage};
 use ark::rounds::RoundSeq;
 
 use crate::WalletVtxo;
@@ -190,7 +189,7 @@ pub struct PaidInvoice {
 pub struct SettledLightningReceive {
 	pub payment_hash: PaymentHash,
 	pub preimage: Preimage,
-	pub invoice: Bolt11Invoice,
+	pub invoice: Invoice,
 	pub amount: Amount,
 	pub settled_at: chrono::DateTime<chrono::Local>,
 }

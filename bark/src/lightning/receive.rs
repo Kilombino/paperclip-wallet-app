@@ -5,7 +5,7 @@ use lightning_invoice::Bolt11Invoice;
 use log::{error, info, warn};
 use server_rpc::protos;
 
-use ark::lightning::{Bolt11InvoiceExt, Preimage, PaymentHash};
+use ark::lightning::{Preimage, PaymentHash};
 
 use crate::Wallet;
 use crate::actions::{DriveMode, WalletAction};
@@ -123,7 +123,7 @@ impl Wallet {
 	) -> anyhow::Result<Bolt11Invoice> {
 		let start = start_lightning_receive(self, amount, description, token, None).await?;
 		self.inner.db.upsert_wallet_action_checkpoint(&start.id(), &start.clone().into()).await?;
-		Ok(start.invoice.clone())
+		start.invoice.into_bolt11().context("expected BOLT11 receive invoice")
 	}
 
 	/// Create, store and return a [`Bolt11Invoice`] whose claimed Ark VTXO
@@ -159,7 +159,7 @@ impl Wallet {
 			self, amount, description, token, Some(claim_destination),
 		).await?;
 		self.inner.db.upsert_wallet_action_checkpoint(&start.id(), &start.clone().into()).await?;
-		Ok(start.invoice.clone())
+		start.invoice.into_bolt11().context("expected BOLT11 receive invoice")
 	}
 
 	/// Cancel a pending lightning receive.
@@ -300,7 +300,7 @@ impl Wallet {
 
 		let results: Vec<_> = tokio_stream::iter(pending)
 			.map(|rcv| async move {
-				self.try_claim_lightning_receive(rcv.invoice.into(), wait).await
+				self.try_claim_lightning_receive(rcv.payment_hash, wait).await
 			})
 			.buffer_unordered(3)
 			.collect()

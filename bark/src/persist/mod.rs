@@ -33,12 +33,11 @@ use bitcoin::bip32::Fingerprint;
 use bitcoin::{Amount, Transaction, Txid};
 use bitcoin::secp256k1::PublicKey;
 use chrono::DateTime;
-use lightning_invoice::Bolt11Invoice;
 #[cfg(feature = "onchain-bdk")]
 use bdk_wallet::ChangeSet;
 
 use ark::{Vtxo, VtxoId};
-use ark::lightning::{PaymentHash, Preimage};
+use ark::lightning::{Invoice, PaymentHash, Preimage};
 use ark::vtxo::Full;
 
 use crate::WalletProperties;
@@ -524,7 +523,7 @@ pub trait BarkPersister: Send + Sync + 'static {
 		&self,
 		payment_hash: PaymentHash,
 		preimage: Preimage,
-		invoice: &Bolt11Invoice,
+		invoice: &Invoice,
 		amount: Amount,
 	) -> anyhow::Result<()>;
 

@@ -142,8 +142,8 @@ pub async fn get_receive_status(
 
 	let payment_hash = if let Ok(h) = ark::lightning::PaymentHash::from_str(&identifier) {
 		h
-	} else if let Ok(i) = Bolt11Invoice::from_str(&identifier) {
-		i.into()
+	} else if let Ok(i) = ark::lightning::Invoice::from_str(&identifier) {
+		i.payment_hash()
 	} else if let Ok(p) = ark::lightning::Preimage::from_str(&identifier) {
 		p.into()
 	} else {
@@ -184,8 +184,8 @@ pub async fn get_send_status(
 
 	let payment_hash = if let Ok(h) = ark::lightning::PaymentHash::from_str(&identifier) {
 		h
-	} else if let Ok(i) = Bolt11Invoice::from_str(&identifier) {
-		i.into()
+	} else if let Ok(i) = ark::lightning::Invoice::from_str(&identifier) {
+		i.payment_hash()
 	} else {
 		badarg!("identifier is not a valid payment hash or invoice");
 	};
@@ -252,8 +252,8 @@ pub async fn cancel_receive(
 
 	let payment_hash = if let Ok(h) = ark::lightning::PaymentHash::from_str(&identifier) {
 		h
-	} else if let Ok(i) = Bolt11Invoice::from_str(&identifier) {
-		i.into()
+	} else if let Ok(i) = ark::lightning::Invoice::from_str(&identifier) {
+		i.payment_hash()
 	} else {
 		badarg!("identifier is not a valid payment hash or invoice");
 	};
