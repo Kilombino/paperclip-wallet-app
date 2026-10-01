@@ -189,6 +189,23 @@ impl ChainSource {
 				}
 				Ok(())
 			},
+			// Kilombino wallet: over Esplora the relay policy is read from the backend's
+			// `/v1/blake2b/relay-policy` (mempool.kilombino.com exposes its Knots node's
+			// getmempoolinfo there; Kilombino/mempool-bip110). Same fields, same ceilings: the
+			// node that will relay our transactions is the one being checked.
+			ChainSourceClient::Esplora(client) => {
+				let url = format!("{}/v1/blake2b/relay-policy", client.url().trim_end_matches('/'));
+				let info: serde_json::Value = client.client().get(&url).send().await
+					.context("relay policy request failed")?
+					.error_for_status().context("Esplora backend does not expose its relay policy")?
+					.json().await.context("invalid relay policy response")?;
+				for (field, ceiling) in [("minrelaytxfee", 0.00001000), ("mempoolminfee", 0.00001000), ("dustrelayfee", 0.00003000)] {
+					let value = info[field].as_f64().context("backend omits relay policy")?;
+					ensure!(value >= 0.0 && value <= ceiling, "backend {} exceeds the funded profile; refusing new positions", field);
+				}
+				Ok(())
+			},
+			#[allow(unreachable_patterns)]
 			_ => bail!("funded profile requires a Knots RPC backend to verify relay policy"),
 		}
 	}
