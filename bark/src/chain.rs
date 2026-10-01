@@ -285,7 +285,10 @@ impl ChainSource {
 	) -> anyhow::Result<Self> {
 		anyhow::ensure!(bitcoin_ext::paperclip_network::enabled(network),
 			"XBT mainnet requires explicit PAPERCLIP_XBT_MAINNET=1; only regtest is enabled by default");
-		anyhow::ensure!(!matches!(&spec, ChainSourceSpec::Esplora { .. }), "XBT requires a local Knots RPC backend; Esplora is not validated");
+		// Kilombino wallet: Esplora is allowed so Ark can run on a phone, which cannot carry a
+		// Knots node. Validated against mempool.kilombino.com/api, whose Esplora routes were
+		// completed for this (raw tx, outspend, 25-per-page scripthash history; see
+		// Kilombino/mempool-bip110 6b7bc34df). Upstream Paperclip still requires Knots RPC.
 		let (inner, zmq_endpoint) = match spec {
 			#[cfg(feature = "bitcoind-rpc")]
 			ChainSourceSpec::Bitcoind { url, auth, zmq } => {

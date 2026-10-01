@@ -1,0 +1,219 @@
+//! Ark inside Kilombino wallet (Android).
+//!
+//! Instead of binding the whole bark API to Kotlin, this runs the same wallet daemon and
+//! REST API that paperclip-walletd serves to its web UI, inside the app process:
+//!
+//! - bound to 127.0.0.1 only, on a port chosen by the app;
+//! - protected by a fresh random bearer token generated on every start and handed to
+//!   the app in memory (never written to disk), so other apps on the phone that find
+//!   the port cannot use it;
+//! - chain data over Esplora (mempool.kilombino.com/api), because a phone cannot run a
+//!   Knots node.
+//!
+//! JNI surface: `start(datadir, port) -> token` and `stop()`. Everything else is HTTP.
+
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::sync::{Arc, Mutex, OnceLock};
+
+use anyhow::Context;
+use bitcoin::secp256k1::rand::{self, RngCore};
+use log::{info, warn};
+
+use bark_cli::connection;
+use bark_cli::wallet::{ConfigOpts, CreateOpts, create_wallet, open_wallet};
+use bark_json::web::{BarkNetwork, BitcoindAuth, ChainSourceConfig, CreateWalletRequest};
+use bark_rest::auth::AuthToken;
+use bark_rest::{Config, OnWalletCreate, OnWalletDelete, RestServer, ServerState};
+use tokio_util::sync::CancellationToken;
+
+const USER_AGENT: &str = "kilombino-wallet-ark/0.1";
+
+struct Running {
+	server: RestServer,
+	shutdown: CancellationToken,
+	wallet: Option<bark::Wallet>,
+	// Held for as long as the daemon runs: stops a second instance on the same datadir.
+	_lock: Box<dyn std::any::Any + Send>,
+}
+
+static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
+
+fn runtime() -> &'static tokio::runtime::Runtime {
+	RUNTIME.get_or_init(|| {
+		tokio::runtime::Builder::new_multi_thread()
+			// A phone does not need many workers, and the wallet mostly waits on network.
+			.worker_threads(2)
+			.enable_all()
+			.thread_name("kilombino-ark")
+			.build()
+			.expect("tokio runtime")
+	})
+}
+
+fn create_opts(req: CreateWalletRequest) -> anyhow::Result<CreateOpts> {
+	let mnemonic = match req.mnemonic {
+		Some(m) => Some(bip39::Mnemonic::from_str(&m).context("invalid mnemonic")?),
+		None => None,
+	};
+	#[allow(deprecated)]
+	let mut config = ConfigOpts {
+		ark: req.ark_server,
+		access_token: req.ark_server_access_token,
+		esplora: None,
+		bitcoind: None,
+		bitcoind_cookie: None,
+		bitcoind_user: None,
+		bitcoind_pass: None,
+		socks5_proxy: None,
+		gap_limit: req.gap_limit,
+	};
+	match req.chain_source {
+		Some(ChainSourceConfig::Esplora { url }) => config.esplora = Some(url),
+		Some(ChainSourceConfig::Bitcoind { bitcoind, bitcoind_auth }) => {
+			config.bitcoind = Some(bitcoind);
+			match bitcoind_auth {
+				BitcoindAuth::Cookie { cookie } => config.bitcoind_cookie = Some(cookie),
+				BitcoindAuth::UserPass { user, pass } => {
+					config.bitcoind_user = Some(user);
+					config.bitcoind_pass = Some(pass);
+				},
+			}
+		},
+		None => {},
+	}
+	Ok(CreateOpts {
+		force: req.force,
+		use_filestore: false,
+		mainnet: req.network == BarkNetwork::Mainnet,
+		regtest: req.network == BarkNetwork::Regtest,
+		signet: req.network == BarkNetwork::Signet,
+		mutinynet: req.network == BarkNetwork::Mutinynet,
+		mnemonic,
+		birthday_height: req.birthday_height.map(Into::into),
+		config,
+	})
+}
+
+/// Starts the wallet daemon and its REST API. Returns the bearer token to use.
+/// Starting twice returns an error rather than a second daemon.
+pub fn start(datadir: &Path, port: u16) -> anyhow::Result<String> {
+	let mut running = RUNNING.lock().unwrap();
+	anyhow::ensure!(running.is_none(), "already running");
+
+	// Paperclip only enables XBT mainnet when asked to explicitly.
+	// SAFETY: set once, before the runtime spawns wallet threads that read it.
+	unsafe { std::env::set_var("PAPERCLIP_XBT_MAINNET", "1"); }
+
+	std::fs::create_dir_all(datadir).with_context(|| format!("create {}", datadir.display()))?;
+	bark_cli::log::init_logging(false, true, datadir, None, false);
+
+	let mut secret = [0u8; 32];
+	rand::thread_rng().fill_bytes(&mut secret);
+	let token = AuthToken::new(secret);
+	let encoded = token.encode();
+
+	let datadir = datadir.to_path_buf();
+	let r = runtime().block_on(async move {
+		let lock = connection::acquire_barkd_lock(&datadir)?;
+		let shutdown = CancellationToken::new();
+
+		let wallet = open_wallet(&datadir, USER_AGENT).await?;
+		if let Some(w) = &wallet {
+			w.start_daemon()?;
+			info!("Ark wallet loaded, daemon started");
+		} else {
+			warn!("No Ark wallet yet; REST API up so the app can create one");
+		}
+
+		let on_create: Box<OnWalletCreate> = Box::new({
+			let datadir = datadir.clone();
+			move |req: CreateWalletRequest| {
+				let datadir = datadir.clone();
+				Box::pin(async move {
+					create_wallet(&datadir, USER_AGENT, create_opts(req)?).await?;
+					let wallet = open_wallet(&datadir, USER_AGENT).await?.expect("wallet just created");
+					if let Err(e) = wallet.refresh_server().await {
+						warn!("Ark server handshake failed on wallet creation: {:#}", e);
+					}
+					wallet.start_daemon()?;
+					Ok::<_, anyhow::Error>(wallet)
+				})
+			}
+		});
+		let on_delete: Box<OnWalletDelete> = Box::new({
+			let datadir = datadir.clone();
+			move || {
+				let datadir = datadir.clone();
+				Box::pin(async move {
+					connection::wipe_datadir_except_barkd_files(&datadir)?;
+					Ok(())
+				})
+			}
+		});
+
+		let state = ServerState::builder()
+			.wallet(wallet.clone())
+			.auth_token(Some(token))
+			.on_wallet_create(on_create)
+			.on_wallet_delete(on_delete)
+			.on_get_mnemonic(None)
+			.build(shutdown.clone());
+
+		let mut config = Config::default();
+		config.host = "127.0.0.1".parse().unwrap();
+		config.port = port;
+		let server = RestServer::start(&config, Arc::new(state), shutdown.clone()).await?;
+		Ok::<_, anyhow::Error>(Running { server, shutdown, wallet, _lock: Box::new(lock) })
+	})?;
+	*running = Some(r);
+	Ok(encoded)
+}
+
+/// Stops the daemon and the REST API (waits for a clean shutdown).
+pub fn stop() {
+	let taken = RUNNING.lock().unwrap().take();
+	if let Some(r) = taken {
+		r.shutdown.cancel();
+		if let Some(w) = &r.wallet {
+			w.stop_daemon();
+		}
+		let _ = runtime().block_on(r.server.stop_wait());
+	}
+}
+
+// ---------------------------------------------------------------------------- JNI
+
+mod jni_api {
+	use super::*;
+	use jni::JNIEnv;
+	use jni::objects::{JClass, JString};
+	use jni::sys::{jint, jstring};
+
+	/// `ArkNative.start(datadir, port)`: the bearer token, or "ERR:<message>".
+	#[unsafe(no_mangle)]
+	pub extern "system" fn Java_com_kilombino_pyblockwatch_ark_ArkNative_start<'l>(
+		mut env: JNIEnv<'l>, _class: JClass<'l>, datadir: JString<'l>, port: jint,
+	) -> jstring {
+		let out = match env.get_string(&datadir) {
+			Ok(d) => {
+				let d: String = d.into();
+				match start(&PathBuf::from(d), port as u16) {
+					Ok(token) => token,
+					Err(e) => format!("ERR:{:#}", e),
+				}
+			},
+			Err(e) => format!("ERR:bad datadir: {e}"),
+		};
+		env.new_string(out).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
+	}
+
+	/// `ArkNative.stop()`.
+	#[unsafe(no_mangle)]
+	pub extern "system" fn Java_com_kilombino_pyblockwatch_ark_ArkNative_stop<'l>(
+		_env: JNIEnv<'l>, _class: JClass<'l>,
+	) {
+		stop();
+	}
+}

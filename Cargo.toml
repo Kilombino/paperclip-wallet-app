@@ -10,7 +10,8 @@ members = [
   "bip321",
   "bitcoin-ext",
   "lib",
-  "server-rpc"
+  "server-rpc",
+  "kilombino-ark"
 ]
 
 resolver = "2"
@@ -37,6 +38,14 @@ debug-assertions = true
 [profile.release]
 overflow-checks = true
 lto = true
+
+# Kilombino wallet (Android): the same release build, tuned for size — it ships inside
+# the APK. Size over speed is fine: the wallet mostly waits on the network.
+[profile.android]
+inherits = "release"
+opt-level = "z"
+codegen-units = 1
+strip = true
 
 # TODO(stevenroose) at some point probably move these inline
 [workspace.dependencies]

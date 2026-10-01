@@ -1,0 +1,24 @@
+[package]
+name = "kilombino-ark"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Ark for Kilombino wallet (Android): runs the Paperclip/bark wallet and its REST API in-process"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Same wallet code as paperclip-walletd, built for a phone: Mozilla CA roots bundled
+# (no system trust store to read) and SQLite compiled in.
+bark-cli = { path = "../bark-cli", default-features = false, features = ["tls-webpki-roots", "sqlite-bundled"] }
+bark-rest = { path = "../bark-rest", default-features = false }
+bark-json = { path = "../bark-json" }
+bark-wallet = { path = "../bark", default-features = false }
+bitcoin.workspace = true
+bip39.workspace = true
+anyhow.workspace = true
+log.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio-util.workspace = true
+jni = { version = "0.21", default-features = false }
