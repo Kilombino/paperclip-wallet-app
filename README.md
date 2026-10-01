@@ -5,11 +5,18 @@ contributors. This edition presets new wallets to **https://ark.paperclippool.xy
 Existing wallet configuration is preserved. Wallet keys stay on your device.
 
 **Public beta. Paperclip Ark is open for XBT deposits, Ark transfers, and Lightning payments.**
-Use wallet **0.7.4 or later**. Check [service status](https://ark.paperclippool.xyz/) before funding.
+Use wallet **0.7.5 or later**. Check [service status](https://ark.paperclippool.xyz/) before funding.
 
 Current beta limits: boarding starts at **20,000 sats**; Lightning payments are
 limited to **250,000 sats**. Fees and recovery reserves apply. Very small Lightning
 payments can be below the funded-HTLC minimum. The server can change these limits.
+
+## What changed in 0.7.5
+
+Clearer Lightning send and receive flows, readable activity and VTXO dashboards,
+block-based expiry warnings, and guided recovery controls. Optional tab-scoped
+sessions survive page refresh; Lock clears the saved token. Visible tabs refresh
+balances without resubmitting payments. Reduced-motion settings are respected.
 
 ## Features
 
@@ -33,8 +40,8 @@ The [StartOS 0.4 wrapper](https://github.com/connorslab/paperclip-wallet-startos
 
 Current releases:
 
-- [Umbrel community store](https://github.com/connorslab/paperclip-umbrel-app-store): wallet 0.7.4, with a pinned image.
-- [StartOS 0.4 installers](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.7.4-beta.1): x86-64 and ARM64 beta packages.
+- [Umbrel community store](https://github.com/connorslab/paperclip-umbrel-app-store): wallet 0.7.5, with a pinned image.
+- [StartOS 0.4 installers](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.7.5-beta.1): x86-64 and ARM64 beta packages.
 
 See [platform instructions](deployment/PLATFORMS.md) for authentication,
 backend setup, packaging, and restore requirements.
@@ -58,7 +65,7 @@ retains explicit network selection and mainnet opt-in outside platform packages.
 
 ## Verification status
 
-Native amd64 and arm64 images pass startup checks. Umbrel 0.7.4 is deployed
+Native amd64 and arm64 images pass startup checks. Umbrel 0.7.5 is deployed
 and healthy. StartOS 0.4 packages build and pass manifest validation; device
 setup and backup/restore verification remain in progress.
 
