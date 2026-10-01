@@ -435,6 +435,7 @@ dependencies = [
  "bark-common",
  "bark-runtime",
  "bark-server-rpc",
+ "base64 0.22.1",
  "bdk_bitcoind_rpc",
  "bdk_core",
  "bdk_esplora",

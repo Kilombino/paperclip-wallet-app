@@ -17,6 +17,38 @@ use utoipa::ToSchema;
 use crate::cli::RoundStatus;
 
 
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+pub struct OnchainMessageRequest {
+	pub address: String,
+	/// Exact UTF-8 message, including whitespace; at most 4096 bytes.
+	pub message: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+pub struct OnchainMessageProof {
+	pub address: String,
+	pub message: String,
+	pub signature: String,
+	pub scheme: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+pub struct OnchainMessageVerifyRequest {
+	pub address: String,
+	pub message: String,
+	pub signature: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+pub struct OnchainMessageVerification {
+	pub valid: bool,
+}
+
+
 /// Query parameters for filtering wallet history by payment method.
 ///
 /// Both fields are optional but must be supplied together: omit both to get the

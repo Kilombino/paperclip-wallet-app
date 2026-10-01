@@ -107,5 +107,5 @@
     cards.set(outputId, {card, url});
   }
 
-  window.PaperclipReceive = {show, clear, encode};
+  window.PaperclipReceive = {show, clear, encode, copy};
 })();

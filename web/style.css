@@ -25,3 +25,11 @@ body{background:radial-gradient(ellipse at 85% 0%,#f568350a,transparent 48%),#11
 @media(prefers-reduced-motion:reduce){.receive-card{animation:none}}
 
 .receive-raw{margin:.75rem 0}.receive-raw output{max-height:9rem;overflow:auto;font-size:.8rem}
+
+/* Message proofs stay separate from payments and keep exact whitespace visible. */
+.message-card textarea{width:100%;box-sizing:border-box;resize:vertical;white-space:pre-wrap;font:inherit;padding:12px;border:1px solid var(--border,#344459);border-radius:12px;background:#101c2c;color:#edf3fc}
+.message-card output{white-space:pre-wrap;overflow-wrap:anywhere}
+.message-card details{margin-top:20px}.message-card summary{cursor:pointer}
+#message-proof:not([hidden]){animation:message-reveal .2s ease-out}
+@keyframes message-reveal{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){#message-proof:not([hidden]){animation:none}}

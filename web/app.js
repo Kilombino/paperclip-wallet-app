@@ -358,3 +358,43 @@ $('vtxo-filter').onchange = renderVtxos;
 $('vtxo-update').onclick = event => run(event.target,async()=>{await update();status('VTXOs updated.');});
 const vtxoLock = $('lock').onclick;
 $('lock').onclick = () => { vtxoLock();vtxoRenderKey='';vtxoSnapshot={balance:{},rows:[],tip:null};$('vtxo-list').replaceChildren();$('vtxo-summary').replaceChildren();$('vtxo-tip').textContent=''; };
+
+let messageProof = null;
+function clearMessageProof() {
+  messageProof = null; $('message-proof').hidden = true;
+  $('message-signature').textContent = ''; $('message-verification').textContent = '';
+}
+function messageInput() {
+  return {address: $('message-address').value.trim(), message: $('message-text').value};
+}
+$('message-address').oninput = clearMessageProof;
+$('message-text').oninput = clearMessageProof;
+$('message-verify-signature').oninput = () => { $('message-verification').textContent = ''; };
+$('onchain-message').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
+  clearMessageProof();
+  const input = messageInput(), session = token;
+  if (!confirm('Sign this exact message for ' + input.address + '?\n\n' + input.message + '\n\nThis proves address ownership. No funds will move.')) return;
+  const proof = await api('onchain/message/sign', input);
+  if (!token || token !== session || JSON.stringify(input) !== JSON.stringify(messageInput())) return;
+  if (proof.scheme !== 'bip322-simple' || proof.message !== input.message || proof.address?.toLowerCase() !== input.address.toLowerCase() || typeof proof.signature !== 'string' || !proof.signature.startsWith('smp')) throw new Error('Unexpected message proof response.');
+  messageProof = proof;
+  $('message-signature').textContent = proof.signature; $('message-proof').hidden = false;
+  status('Message signed. Share the exact message, address, and signature with the verifier.');
+}); };
+$('message-copy').onclick = event => run(event.target, async () => {
+  if (!messageProof || !token) throw new Error('Sign a message first.');
+  await PaperclipReceive.copy(messageProof.signature);
+  status('Signature copied.');
+});
+$('message-verify').onclick = event => run(event.target, async () => {
+  const input = {...messageInput(), signature: $('message-verify-signature').value.trim()}, session = token;
+  $('message-verification').textContent = '';
+  const result = await api('onchain/message/verify', input);
+  if (!token || token !== session || input.address !== messageInput().address || input.message !== messageInput().message || input.signature !== $('message-verify-signature').value.trim()) return;
+  $('message-verification').textContent = result.valid ? 'Valid: this signature proves control of the address for the exact message.' : 'Invalid: the address, message, and signature do not match.';
+});
+const messageLock = $('lock').onclick;
+$('lock').onclick = () => {
+  messageLock(); clearMessageProof();
+  $('message-address').value = ''; $('message-text').value = ''; $('message-verify-signature').value = '';
+};

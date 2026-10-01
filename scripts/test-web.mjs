@@ -26,6 +26,8 @@ function fixture(network, lightningEnabled = true, empty = false) {
         : path.endsWith('/addresses/next') ? {address: 'bc1-test-address'}
         : path.endsWith('/lightning/pay') ? {payment_hash: 'test-hash', message: 'initiated'}
         : path.endsWith('/receives/invoice') ? {invoice: 'ln-test-invoice'}
+        : path.endsWith('/onchain/message/sign') ? {...JSON.parse(options.body),scheme:'bip322-simple',signature:'smp-test-proof'}
+        : path.endsWith('/onchain/message/verify') ? {valid:true}
         : path.endsWith('/onchain/send') ? {txid: 'test-txid'} : [];
       return {ok: true, status: 200, json: async () => result};
     }});
@@ -217,3 +219,38 @@ for (const change of ['destination', 'lock']) {
   assert(!f.calls.some(c => c.path.endsWith('/wallet/send')), 'Stale estimate must not send');
 }
 console.log('PASS: edited destination and locked wallet invalidate an in-flight estimate');
+
+for (const scenario of ['approve', 'cancel', 'lock', 'edit']) {
+  const f = fixture('bitcoin');
+  f.element('token').value = 'test-token'; await f.trigger('unlock', 'submit');
+  f.element('message-address').value = 'bc1p-test';
+  f.element('message-text').value = '  Paperclip challenge\nnonce: 123\n';
+  let review = '';
+  f.context.confirm = text => {review = text; return scenario !== 'cancel';};
+  const fetch = f.context.fetch;
+  f.context.fetch = async (path, options) => {
+    const result = await fetch(path, options);
+    if (path.endsWith('/onchain/message/sign')) {
+      if (scenario === 'lock') await f.trigger('lock');
+      if (scenario === 'edit') f.element('message-text').value = 'changed';
+    }
+    return result;
+  };
+  await f.trigger('onchain-message', 'onsubmit');
+  assert(review.includes('  Paperclip challenge\nnonce: 123\n'));
+  const signed = f.calls.filter(c => c.path.endsWith('/onchain/message/sign'));
+  assert.equal(signed.length, scenario === 'cancel' ? 0 : 1);
+  if (signed.length) assert.equal(JSON.parse(signed[0].options.body).message, '  Paperclip challenge\nnonce: 123\n');
+  assert.equal(f.element('message-proof').hidden, scenario !== 'approve');
+  if (scenario === 'approve') {
+    f.element('message-verify-signature').value = 'smp-test-proof';
+    await f.trigger('message-verify');
+    assert.match(f.element('message-verification').textContent, /^Valid:/);
+    await f.trigger('message-text', 'oninput');
+    assert.equal(f.element('message-proof').hidden, true);
+    await f.trigger('lock');
+    assert.equal(f.element('message-text').value, '');
+  }
+  assert(!f.calls.some(c => /onchain\/(send|drain)|wallet\/send/.test(c.path)));
+}
+console.log('PASS: exact message review, cancellation, no payment, verification, edit/lock invalidation');

@@ -17,6 +17,13 @@ payments can be below the funded-HTLC minimum. The server can change these limit
 experimental and provided without warranty. Functional tests are not a security
 audit. Bugs can cause loss of funds. Use only amounts you can afford to lose.
 
+## In development
+
+Development branch: [on-chain message signing](docs/onchain-message-signing.md)
+adds BIP322-simple Taproot ownership proofs in the web UI, CLI, and authenticated
+API. This is being prepared alongside reusable BOLT12 receiving and local receive
+QR codes; it is not included in the 0.7.7 packages linked below.
+
 ## What changed in 0.7.7
 
 Adds an accurate Ark-send cost preview and an approved debit limit. Retains
