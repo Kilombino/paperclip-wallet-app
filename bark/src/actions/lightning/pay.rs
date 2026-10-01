@@ -368,7 +368,7 @@ pub(crate) async fn start_lightning_send(
 			total_amount: payment_amount.checked_add(fee).context("payment overflow")?,
 			policy: VtxoPolicy::new_server_htlc_send(change_keypair.public_key(), invoice.payment_hash(), htlc_expiry),
 		}, VtxoPolicy::new_pubkey(change_keypair.public_key()),
-	).context("payment would leave a dust or unfunded HTLC; refresh inputs first")?;
+	).context("payment is below the funded-HTLC minimum or leaves dust change; use a larger amount or refresh inputs")?;
 	let action_id = ln_pay_action_id(invoice.payment_hash());
 	wallet.lock_vtxos(&inputs, Some(VtxoLockHolder::Action { id: action_id })).await?;
 

@@ -180,15 +180,12 @@ impl Wallet {
 
 		match recv.progress {
 			Progress::AwaitingPayment => {
-				// Best-effort server cancel: an abandoned hold invoice just
-				// expires server-side, so don't fail the local cancel on error.
-				if let Ok((mut srv, _)) = self.require_server().await {
-					if let Err(e) = srv.client.cancel_lightning_receive(
-						protos::CancelLightningReceiveRequest { payment_hash: hash.to_vec() },
-					).await {
-						warn!("server did not cancel lightning receive {}: {}", hash, e);
-					}
-				}
+				// Preserve the receive checkpoint unless the server acknowledges cancellation.
+				// A held payment may still settle or need recovery after a refusal.
+				let (mut srv, _) = self.require_server().await?;
+				srv.client.cancel_lightning_receive(
+					protos::CancelLightningReceiveRequest { payment_hash: hash.to_vec() },
+				).await.context("server did not cancel the receive; it remains pending")?;
 				self.stop_wallet_action(&key).await?;
 				Ok(())
 			},
