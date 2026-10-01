@@ -9,11 +9,10 @@ use bitcoin::bip32::Fingerprint;
 use bitcoin::hashes::hex::DisplayHex;
 use bitcoin::secp256k1::PublicKey;
 use chrono::DateTime;
-use lightning_invoice::Bolt11Invoice;
 use rusqlite::{self, named_params, params, Connection, OptionalExtension, ToSql, Transaction};
 
 use ark::{ProtocolEncoding, Vtxo};
-use ark::lightning::{PaymentHash, Preimage};
+use ark::lightning::{Invoice, PaymentHash, Preimage};
 use ark::vtxo::Full;
 
 use crate::{VtxoId, WalletProperties};
@@ -1069,7 +1068,7 @@ pub fn record_settled_lightning_receive(
 	conn: &Connection,
 	payment_hash: PaymentHash,
 	preimage: Preimage,
-	invoice: &Bolt11Invoice,
+	invoice: &Invoice,
 	amount: Amount,
 ) -> anyhow::Result<()> {
 	let query = "
@@ -1103,7 +1102,7 @@ pub fn get_settled_lightning_receive(
 	let preimage = Preimage::from_str(&preimage_str)
 		.context("invalid preimage hex in bark_settled_lightning_receive")?;
 	let invoice_str: String = row.get("invoice")?;
-	let invoice = Bolt11Invoice::from_str(&invoice_str)
+	let invoice = Invoice::from_str(&invoice_str)
 		.context("invalid invoice in bark_settled_lightning_receive")?;
 	let amount = Amount::from_sat(row.get::<_, i64>("amount_sat")? as u64);
 	let settled_at: chrono::DateTime<chrono::Local> = row.get("settled_at")?;

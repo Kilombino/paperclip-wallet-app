@@ -4,12 +4,11 @@ use anyhow::Context;
 use bitcoin::Amount;
 use clap;
 use lightning::offers::offer::Offer;
-use lightning_invoice::Bolt11Invoice;
 use lnurl::lightning_address::LightningAddress;
 use lnurl::lnurl::LnUrl;
 use log::info;
 
-use ark::lightning::{PaymentHash, Preimage};
+use ark::lightning::{Invoice, PaymentHash, Preimage};
 use bark::Wallet;
 use bark_json::cli::{InvoiceInfo, LightningReceiveInfo, LightningSendInfo};
 
@@ -17,6 +16,17 @@ use bark_cli::util::output_json;
 
 #[derive(clap::Subcommand)]
 pub enum LightningCommand {
+	/// Create a reusable BOLT12 offer. Keep paperclip-walletd running to receive.
+	Offer {
+		#[arg(long, default_value = "Paperclip wallet")]
+		description: String,
+		#[arg(long)]
+		amount: Option<Amount>,
+	},
+	/// Show the saved reusable offer.
+	OfferStatus,
+	/// Stop new offer requests while preserving in-progress payments.
+	DisableOffer,
 	/// Pay a bolt11 invoice or check payment status
 	#[command(subcommand)]
 	Pay(PayCommand),
@@ -138,8 +148,8 @@ pub struct LightningStatusFilterGroup {
 fn payment_hash_from_filter(filter: &str) -> anyhow::Result<PaymentHash> {
 	if let Ok(h) = PaymentHash::from_str(&filter) {
 		Ok(h)
-	} else if let Ok(i) = Bolt11Invoice::from_str(&filter) {
-		Ok(i.into())
+	} else if let Ok(i) = Invoice::from_str(&filter) {
+		Ok(i.payment_hash())
 	} else {
 		bail!("filter is not valid payment hash nor invoice");
 	}
@@ -150,6 +160,12 @@ pub async fn execute_lightning_command(
 	wallet: &mut Wallet,
 ) -> anyhow::Result<()> {
 	match lightning_command {
+		LightningCommand::Offer { description, amount } => {
+			let offer = wallet.create_lightning_offer(description, amount.map(|a| a.to_sat())).await?;
+			output_json(&offer);
+		},
+		LightningCommand::OfferStatus => output_json(&wallet.lightning_offer().await?),
+		LightningCommand::DisableOffer => { wallet.disable_lightning_offer().await?; },
 		LightningCommand::Pay(pay_cmd) => {
 			execute_pay_command(pay_cmd, wallet).await?;
 		},
@@ -185,8 +201,8 @@ pub async fn execute_lightning_command(
 			if let Some(payment) = payment {
 				let payment_hash = match PaymentHash::from_str(&payment) {
 					Ok(h) => h,
-					Err(_) => match Bolt11Invoice::from_str(&payment) {
-						Ok(i) => i.into(),
+					Err(_) => match Invoice::from_str(&payment) {
+						Ok(i) => i.payment_hash(),
 						Err(_) => bail!("invalid invoice or payment hash"),
 					}
 				};
@@ -213,9 +229,9 @@ async fn execute_pay_command(
 				wallet.sync().await;
 			}
 
-			if let Ok(invoice) = Bolt11Invoice::from_str(&invoice) {
+			if let Ok(invoice) = Invoice::from_str(&invoice) {
 				if comment.is_some() {
-					bail!("comment is not supported for BOLT-11 invoices");
+					bail!("comment is not supported for Lightning invoices");
 				}
 				wallet.pay_lightning_invoice(invoice, amount, wait).await?;
 			} else if let Ok(offer) = Offer::from_str(&invoice) {
@@ -230,7 +246,7 @@ async fn execute_pay_command(
 				let amount = amount.context("amount is required for LNURL")?;
 				wallet.pay_lnurl(&lnurl, amount, comment, wait).await?;
 			} else {
-				bail!("argument is not a valid BOLT-11 invoice, BOLT-12 offer, \
+				bail!("argument is not a valid BOLT-11 or BOLT-12 invoice, BOLT-12 offer, \
 					Lightning address or LNURL");
 			}
 		},

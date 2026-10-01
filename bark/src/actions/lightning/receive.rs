@@ -17,7 +17,7 @@ use rand::seq::IteratorRandom;
 use ark::arkoor::package::ArkoorPackageBuilder;
 use ark::attestations::LightningReceiveAttestation;
 use ark::fees::validate_and_subtract_fee;
-use ark::lightning::{Bolt11InvoiceExt, PaymentHash, Preimage};
+use ark::lightning::{Invoice, PaymentHash, Preimage};
 use ark::{ProtocolEncoding, Vtxo, VtxoId, VtxoPolicy};
 use ark::vtxo::Full;
 use bitcoin_ext::BlockDelta;
@@ -52,11 +52,11 @@ pub(crate) fn ln_recv_action_id(payment_hash: PaymentHash) -> WalletActionId {
 	format!("{LN_RECV_NAMESPACE}.{payment_hash}")
 }
 
-fn validate_bolt11_payment_hash(
-	invoice: &Bolt11Invoice,
+fn validate_receive_payment_hash(
+	invoice: &Invoice,
 	expected_payment_hash: PaymentHash,
 ) -> anyhow::Result<()> {
-	let invoice_payment_hash = PaymentHash::from(invoice);
+	let invoice_payment_hash = invoice.payment_hash();
 	ensure!(
 		invoice_payment_hash == expected_payment_hash,
 		"Ark server returned invoice with payment hash {}, expected {}",
@@ -72,7 +72,7 @@ fn validate_bolt11_payment_hash(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LightningReceive {
 	// Set at invoice creation, immutable thereafter:
-	pub invoice: Bolt11Invoice,
+	pub invoice: Invoice,
 	pub payment_hash: PaymentHash,
 	pub payment_preimage: Preimage,
 	pub htlc_recv_cltv_delta: BlockDelta,
@@ -376,10 +376,10 @@ pub(crate) async fn start_lightning_receive(
 	let resp = srv.client.start_lightning_receive(req).await?.into_inner();
 	info!("Ark Server is ready to receive LN payment to invoice: {}.", resp.bolt11);
 
-	let invoice = Bolt11Invoice::from_str(&resp.bolt11)
-		.context("invalid bolt11 invoice returned by Ark server")?;
-	ark::lightning::Invoice::from(invoice.clone()).require_xbt()?;
-	validate_bolt11_payment_hash(&invoice, payment_hash)?;
+	let invoice = Invoice::Bolt11(Bolt11Invoice::from_str(&resp.bolt11)
+		.context("invalid bolt11 invoice returned by Ark server")?);
+	invoice.require_xbt()?;
+	validate_receive_payment_hash(&invoice, payment_hash)?;
 
 	let (_, key_index) = wallet.derive_store_next_keypair().await?;
 
@@ -430,10 +430,20 @@ pub(crate) async fn check_incoming_lightning_payment(
 	recv: &LightningReceive,
 ) -> Result<IncomingStatus, AdvanceError> {
 	let (mut srv, _) = wallet.require_server().await?;
-	let sub = srv.client.check_lightning_receive(protos::CheckLightningReceiveRequest {
-		hash: recv.payment_hash.to_byte_array().to_vec(),
-		wait: false,
-	}).await.map_err(AdvanceError::Server)?.into_inner();
+	let query = protos::CheckLightningReceiveRequest { hash: recv.payment_hash.to_vec(), wait: false };
+	let response = srv.client.check_lightning_receive(query.clone()).await;
+	let response = match response {
+		Err(error) if error.code() == tonic::Code::NotFound && matches!(recv.invoice, Invoice::Bolt12(_)) => {
+			if invoice_expired(&recv.invoice) { return Ok(IncomingStatus::Canceled); }
+			let mailbox = ark::mailbox::MailboxIdentifier::from_pubkey(wallet.inner.seed.to_mailbox_keypair().public_key());
+			srv.client.register_bolt12_receive(protos::RegisterBolt12ReceiveRequest {
+				invoice: recv.invoice.to_string(), min_cltv_delta: recv.htlc_recv_cltv_delta.into(), mailbox_id: Some(mailbox.serialize()),
+			}).await.map_err(AdvanceError::Server)?;
+			srv.client.check_lightning_receive(query).await
+		},
+		other => other,
+	};
+	let sub = response.map_err(AdvanceError::Server)?.into_inner();
 
 	let status = protos::LightningReceiveStatus::try_from(sub.status)
 		.with_context(|| format!("unknown payment status: {}", sub.status))?;
@@ -881,31 +891,58 @@ pub(crate) async fn is_htlc_claim_window_closed(
 
 /// Whether an unpaid invoice has passed its bolt11 expiry plus a grace
 /// margin and can be reaped.
-pub(crate) fn invoice_expired(invoice: &Bolt11Invoice) -> bool {
+pub(crate) fn invoice_expired(invoice: &Invoice) -> bool {
 	let now_secs = chrono::Utc::now().timestamp();
 	if now_secs < 0 {
 		return false;
 	}
 	let cutoff = Duration::from_secs(now_secs as u64).saturating_sub(INVOICE_EXPIRY_GRACE);
-	invoice.would_expire(cutoff)
+	invoice.expired_at(cutoff)
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
 
+	#[test]
+	fn receive_invoice_formats_preserve_checkpoints() {
+		let bolt12 = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/testdata/bolt12-invoice.txt")).trim();
+		for encoded in [TEST_INVOICE_STR, bolt12] {
+			let invoice = Invoice::from_str(encoded).unwrap();
+			let receive = LightningReceive {
+				payment_hash: invoice.payment_hash(),
+				invoice,
+				payment_preimage: Preimage::from_slice(&[1; 32]).unwrap(),
+				htlc_recv_cltv_delta: BlockDelta::new(200),
+				anti_dos_token: None,
+				claim_destination: None,
+				key_index: 1,
+				progress: Progress::AwaitingPayment,
+			};
+			validate_receive_payment_hash(&receive.invoice, receive.payment_hash).unwrap();
+			validate_receive_payment_hash(&receive.invoice, PaymentHash::from_slice(&[2; 32]).unwrap())
+				.expect_err("a different secret cannot claim this receive");
+			let mut json = serde_json::to_value(&receive).unwrap();
+			assert_eq!(json["invoice"], encoded);
+			// Older BOLT11 checkpoints have no claim_destination field.
+			json.as_object_mut().unwrap().remove("claim_destination");
+			assert_eq!(serde_json::from_value::<LightningReceive>(json).unwrap(), receive);
+			assert!(receive.invoice.expired_at(Duration::MAX));
+		}
+	}
+
 	const TEST_INVOICE_STR: &str = "lntbs100u1p5j0x82sp5d0rwfh7tgrrlwsegy9rx3tzpt36cqwjqza5x4wvcjxjzscfaf6jspp5d8q7354dg3p8h0kywhqq5dq984r8f5en98hf9ln85ug0w8fx6hhsdqqcqzpc9qyysgqyk54v7tpzprxll7e0jyvtxcpgwttzk84wqsfjsqvcdtq47zt2wssxsmtjhz8dka62mdnf9jafhu3l4cpyfnsx449v4wstrwzzql2w5qqs8uh7p";
 
-	fn test_bolt11() -> Bolt11Invoice {
-		Bolt11Invoice::from_str(TEST_INVOICE_STR).expect("valid test invoice")
+	fn test_bolt11() -> Invoice {
+		Invoice::from_str(TEST_INVOICE_STR).expect("valid test invoice")
 	}
 
 	#[test]
 	fn validate_bolt11_payment_hash_accepts_matching_hash() {
 		let invoice = test_bolt11();
-		let payment_hash = PaymentHash::from(&invoice);
+		let payment_hash = invoice.payment_hash();
 
-		validate_bolt11_payment_hash(&invoice, payment_hash).unwrap();
+		validate_receive_payment_hash(&invoice, payment_hash).unwrap();
 	}
 
 	#[test]
@@ -913,7 +950,7 @@ mod tests {
 		let invoice = test_bolt11();
 		let mismatched_payment_hash = PaymentHash::from_slice(&[0xabu8; 32]).unwrap();
 
-		let err = validate_bolt11_payment_hash(&invoice, mismatched_payment_hash)
+		let err = validate_receive_payment_hash(&invoice, mismatched_payment_hash)
 			.expect_err("mismatched payment hash should fail");
 
 		assert!(

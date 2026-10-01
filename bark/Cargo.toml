@@ -50,6 +50,7 @@ name = "bark"
 path = "src/lib.rs"
 
 [dependencies]
+base64.workspace = true
 
 # OWN
 ark-lib = { version = "0.7.1", path = "../lib" }

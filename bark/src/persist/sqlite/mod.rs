@@ -19,12 +19,11 @@ use anyhow::Context;
 use bitcoin::{Amount, Txid};
 use bitcoin::secp256k1::PublicKey;
 use chrono::DateTime;
-use lightning_invoice::Bolt11Invoice;
 use log::debug;
 use rusqlite::Connection;
 
 use ark::{Vtxo, VtxoId};
-use ark::lightning::{PaymentHash, Preimage};
+use ark::lightning::{Invoice, PaymentHash, Preimage};
 use ark::vtxo::Full;
 
 use crate::WalletProperties;
@@ -345,7 +344,7 @@ impl BarkPersister for SqliteClient {
 		&self,
 		payment_hash: PaymentHash,
 		preimage: Preimage,
-		invoice: &Bolt11Invoice,
+		invoice: &Invoice,
 		amount: Amount,
 	) -> anyhow::Result<()> {
 		let conn = self.connect()?;

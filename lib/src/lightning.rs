@@ -237,6 +237,16 @@ pub enum ValidateIssuanceError {
 }
 
 impl Invoice {
+	/// Whether the invoice expired at `now`, measured from the Unix epoch.
+	/// Use a checked sum so an invalid deadline cannot wrap into the past.
+	pub fn expired_at(&self, now: std::time::Duration) -> bool {
+		match self {
+			Invoice::Bolt11(invoice) => invoice.would_expire(now),
+			Invoice::Bolt12(invoice) => invoice.created_at()
+				.checked_add(invoice.relative_expiry()).is_some_and(|expiry| now > expiry),
+		}
+	}
+
 	pub fn into_bolt11(self) -> Option<Bolt11Invoice> {
 		match self {
 			Invoice::Bolt11(invoice) => Some(invoice),

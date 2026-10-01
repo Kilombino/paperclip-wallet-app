@@ -5,7 +5,7 @@ contributors. This edition presets new wallets to **https://ark.paperclippool.xy
 Existing wallet configuration is preserved. Wallet keys stay on your device.
 
 **Public beta. Paperclip Ark is open for XBT deposits, Ark transfers, and Lightning payments.**
-Use wallet **0.7.7 or later**. Check [service status](https://ark.paperclippool.xyz/) before funding.
+The current release is **0.8.0 beta**. Check [service status](https://ark.paperclippool.xyz/) before funding.
 
 Current beta limits: boarding starts at **20,000 sats**; Lightning payments are
 limited to **250,000 sats**. Fees and recovery reserves apply. Very small Lightning
@@ -16,6 +16,22 @@ payments can be below the funded-HTLC minimum. The server can change these limit
 **Not independently audited.** Paperclip Wallet and its Ark integration are
 experimental and provided without warranty. Functional tests are not a security
 audit. Bugs can cause loss of funds. Use only amounts you can afford to lose.
+
+## What changed in 0.8.0
+
+- Reusable BOLT12 offers receive Lightning payments onto Ark through a compatible server. Keep the wallet service online to answer invoice requests. The browser can close.
+- Receive QR codes for on-chain, Ark, and Lightning are generated locally.
+- [On-chain message signing](docs/onchain-message-signing.md) provides BIP322-simple ownership proofs for wallet-owned Taproot addresses in the web UI, CLI, and authenticated API.
+
+Back up the complete wallet data before an upgrade. Do not downgrade after you
+create a reusable offer: old wallet binaries cannot read its checkpoint. A seed
+alone does not contain all Ark recovery state. Existing 0.7.7 wallets remain
+compatible with the updated Paperclip server.
+
+Paid BOLT12 settlement and failure recovery passed isolated XBT regtest tests.
+Live mainnet checks verified two distinct invoices from one offer without payment.
+The Umbrel upgrade and message signing passed live checks. Signed StartOS packages
+were verified; installation and restore on a physical StartOS device remain unverified.
 
 ## What changed in 0.7.7
 
@@ -68,8 +84,8 @@ The [StartOS 0.4 wrapper](https://github.com/connorslab/paperclip-wallet-startos
 
 Current releases:
 
-- [Umbrel community store](https://github.com/connorslab/paperclip-umbrel-app-store): wallet 0.7.7, with a pinned image.
-- [StartOS 0.4 installers](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.7.7-beta.1): x86-64 and ARM64 beta packages.
+- [Umbrel community store](https://github.com/connorslab/paperclip-umbrel-app-store): wallet 0.8.0, with a pinned image.
+- [StartOS 0.4 installers](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.8.0-beta.1): x86-64 and ARM64 beta packages.
 
 See [platform instructions](deployment/PLATFORMS.md) for authentication,
 backend setup, packaging, and restore requirements.

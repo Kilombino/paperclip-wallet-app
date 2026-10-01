@@ -14,7 +14,7 @@ function fixture(network, lightningEnabled = true, empty = false) {
     return elements.get(id);
   };
   let failPath = null;
-  const context = vm.createContext({document: {getElementById: element, createElement: () => ({textContent:'',append() {}})}, confirm: () => true, URL, btoa, setInterval: () => {}, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+  const context = vm.createContext({PaperclipReceive: {show() {}, clear() {}}, document: {getElementById: element, createElement: () => ({textContent:'',append() {}})}, confirm: () => true, URL, btoa, setInterval: () => {}, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     fetch: async (path, options) => {
       calls.push({path, options});
       if (failPath && path.endsWith(failPath)) throw Error('Transport interrupted');
@@ -25,7 +25,10 @@ function fixture(network, lightningEnabled = true, empty = false) {
         : path.endsWith('/onchain/balance') ? {confirmed_sat: 50000}
         : path.endsWith('/addresses/next') ? {address: 'bc1-test-address'}
         : path.endsWith('/lightning/pay') ? {payment_hash: 'test-hash', message: 'initiated'}
+        : path.endsWith('/lightning/offers') ? (options.method === 'DELETE' ? {active:false} : {offer:'lno1-test-offer',active:true})
         : path.endsWith('/receives/invoice') ? {invoice: 'ln-test-invoice'}
+        : path.endsWith('/onchain/message/sign') ? {...JSON.parse(options.body),scheme:'bip322-simple',signature:'smp-test-proof'}
+        : path.endsWith('/onchain/message/verify') ? {valid:true}
         : path.endsWith('/onchain/send') ? {txid: 'test-txid'} : [];
       return {ok: true, status: 200, json: async () => result};
     }});
@@ -217,3 +220,57 @@ for (const change of ['destination', 'lock']) {
   assert(!f.calls.some(c => c.path.endsWith('/wallet/send')), 'Stale estimate must not send');
 }
 console.log('PASS: edited destination and locked wallet invalidate an in-flight estimate');
+
+{
+  const f = fixture('bitcoin');
+  f.element('token').value = 'local-test-token';
+  await f.trigger('unlock', 'submit');
+  f.element('offer-description').value = 'My reusable offer';
+  f.element('offer-amount').value = '';
+  await f.trigger('ln-offer', 'onsubmit');
+  const created = f.calls.find(c => c.path.endsWith('/lightning/offers') && c.options.method === 'POST');
+  assert.deepEqual(JSON.parse(created.options.body), {description:'My reusable offer',amount_sat:null});
+  assert.equal(f.element('ln-offer-output').textContent,'lno1-test-offer');
+  await f.trigger('offer-disable');
+  assert(f.calls.some(c => c.path.endsWith('/lightning/offers') && c.options.method === 'DELETE'));
+  assert.equal(f.element('offer-disable').hidden,true);
+  await f.trigger('offer-load');
+  await f.trigger('lock');
+  assert.equal(f.element('ln-offer-output').textContent,'');
+}
+console.log('PASS: reusable offer creation, saved offer, authenticated disable, and lock cleanup');
+
+for (const scenario of ['approve', 'cancel', 'lock', 'edit']) {
+  const f = fixture('bitcoin');
+  f.element('token').value = 'test-token'; await f.trigger('unlock', 'submit');
+  f.element('message-address').value = 'bc1p-test';
+  f.element('message-text').value = '  Paperclip challenge\nnonce: 123\n';
+  let review = '';
+  f.context.confirm = text => {review = text; return scenario !== 'cancel';};
+  const fetch = f.context.fetch;
+  f.context.fetch = async (path, options) => {
+    const result = await fetch(path, options);
+    if (path.endsWith('/onchain/message/sign')) {
+      if (scenario === 'lock') await f.trigger('lock');
+      if (scenario === 'edit') f.element('message-text').value = 'changed';
+    }
+    return result;
+  };
+  await f.trigger('onchain-message', 'onsubmit');
+  assert(review.includes('  Paperclip challenge\nnonce: 123\n'));
+  const signed = f.calls.filter(c => c.path.endsWith('/onchain/message/sign'));
+  assert.equal(signed.length, scenario === 'cancel' ? 0 : 1);
+  if (signed.length) assert.equal(JSON.parse(signed[0].options.body).message, '  Paperclip challenge\nnonce: 123\n');
+  assert.equal(f.element('message-proof').hidden, scenario !== 'approve');
+  if (scenario === 'approve') {
+    f.element('message-verify-signature').value = 'smp-test-proof';
+    await f.trigger('message-verify');
+    assert.match(f.element('message-verification').textContent, /^Valid:/);
+    await f.trigger('message-text', 'oninput');
+    assert.equal(f.element('message-proof').hidden, true);
+    await f.trigger('lock');
+    assert.equal(f.element('message-text').value, '');
+  }
+  assert(!f.calls.some(c => /onchain\/(send|drain)|wallet\/send/.test(c.path)));
+}
+console.log('PASS: exact message review, cancellation, no payment, verification, edit/lock invalidation');

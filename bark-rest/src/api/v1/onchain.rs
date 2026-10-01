@@ -28,6 +28,8 @@ fn cast_bdk_mut(w: &mut dyn OnchainWalletTrait) -> anyhow::Result<&mut OnchainWa
 
 pub fn router() -> Router<Arc<ServerState>> {
 	Router::new()
+		.route("/message/sign", post(onchain_message_sign))
+		.route("/message/verify", post(onchain_message_verify))
 		.route("/balance", get(onchain_balance))
 		.route("/addresses/next", post(onchain_address))
 		.route("/send", post(onchain_send))
@@ -41,6 +43,8 @@ pub fn router() -> Router<Arc<ServerState>> {
 #[derive(OpenApi)]
 #[openapi(
 	paths(
+		onchain_message_sign,
+		onchain_message_verify,
 		onchain_balance,
 		onchain_address,
 		onchain_send,
@@ -51,6 +55,10 @@ pub fn router() -> Router<Arc<ServerState>> {
 		onchain_sync,
 	),
 	components(schemas(
+		bark_json::web::OnchainMessageRequest,
+		bark_json::web::OnchainMessageProof,
+		bark_json::web::OnchainMessageVerifyRequest,
+		bark_json::web::OnchainMessageVerification,
 		bark_json::cli::onchain::OnchainBalance,
 		bark_json::cli::onchain::Address,
 		bark_json::cli::onchain::Send,
@@ -65,6 +73,43 @@ pub fn router() -> Router<Arc<ServerState>> {
 	tags((name = "onchain", description = "Manage barkd's on-chain bitcoin wallet."))
 )]
 pub struct OnchainApiDoc;
+
+#[utoipa::path(post, path = "/message/sign", tag = "onchain",
+	request_body = bark_json::web::OnchainMessageRequest,
+	responses((status = 200, body = bark_json::web::OnchainMessageProof)),
+	summary = "Sign an on-chain Taproot address ownership message using BIP322-simple")]
+pub async fn onchain_message_sign(
+	State(state): State<Arc<ServerState>>,
+	Json(body): Json<bark_json::web::OnchainMessageRequest>,
+) -> HandlerResult<Json<bark_json::web::OnchainMessageProof>> {
+	let network = state.require_wallet()?.network().await?;
+	let address = bitcoin::Address::from_str(&body.address).badarg("Invalid address")?
+		.require_network(network).badarg("Wrong address network")?;
+	let onchain = state.require_onchain()?;
+	let guard = onchain.read().await;
+	let signature = cast_bdk(&*guard)?.sign_onchain_message(&address, &body.message)
+		.badarg("Unable to sign on-chain message")?;
+	Ok(Json(bark_json::web::OnchainMessageProof {
+		address: address.to_string(), message: body.message, signature,
+		scheme: "bip322-simple".into(),
+	}))
+}
+
+#[utoipa::path(post, path = "/message/verify", tag = "onchain",
+	request_body = bark_json::web::OnchainMessageVerifyRequest,
+	responses((status = 200, body = bark_json::web::OnchainMessageVerification)),
+	summary = "Verify a BIP322-simple Taproot address ownership message")]
+pub async fn onchain_message_verify(
+	State(state): State<Arc<ServerState>>,
+	Json(body): Json<bark_json::web::OnchainMessageVerifyRequest>,
+) -> HandlerResult<Json<bark_json::web::OnchainMessageVerification>> {
+	let network = state.require_wallet()?.network().await?;
+	let address = bitcoin::Address::from_str(&body.address).badarg("Invalid address")?
+		.require_network(network).badarg("Wrong address network")?;
+	let valid = bark::onchain::message::verify_onchain_message(&address, &body.message, &body.signature)
+		.badarg("Invalid or unsupported message proof")?;
+	Ok(Json(bark_json::web::OnchainMessageVerification { valid }))
+}
 
 #[utoipa::path(
 	get,

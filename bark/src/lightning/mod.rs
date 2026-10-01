@@ -1,6 +1,7 @@
 
 mod pay;
 mod receive;
+pub mod offers;
 
 use anyhow::Context;
 use bitcoin::Amount;

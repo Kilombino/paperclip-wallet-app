@@ -27,14 +27,14 @@ def package(platform, image, destination, app='paperclip-wallet'):
         (out / 'hooks/pre-start').chmod(0o755)
         write(out / 'umbrel-app.yml', {
             'manifestVersion': 1, 'id': app, 'name': 'Paperclip Wallet Beta', 'tagline': 'On-chain, Ark, and Lightning for XBT',
-            'category': 'bitcoin', 'version': '0.7.7', 'port': 38180,
+            'category': 'bitcoin', 'version': '0.8.0', 'port': 38180,
             'description': 'Beta XBT wallet preset to https://ark.paperclippool.xyz. Configure your compatible XBT blockchain backend. Check live service status before funding. Back up the complete wallet.',
             'developer': 'Paperclip', 'website': 'https://github.com/connorslab/paperclip-wallet-app',
             'repo': 'https://github.com/connorslab/paperclip-wallet-app',
             'support': 'https://github.com/connorslab/paperclip-wallet-app/issues',
             'icon': 'https://raw.githubusercontent.com/connorslab/paperclip-wallet-app/main/web/icon.svg', 'dependencies': [], 'gallery': [], 'path': '', 'defaultUsername': '',
             'deterministicPassword': True, 'submitter': 'Paperclip',
-            'releaseNotes': 'Paperclip beta server preset. Local keys, authenticated access, on-chain, Ark, and server-backed Lightning. Platform restore acceptance testing remains required.'
+            'releaseNotes': 'Reusable BOLT12 receiving with a compatible ASP, local receive QR codes, and on-chain message signing. Keep the wallet service online for offer requests. Back up the complete wallet before upgrading; do not downgrade after creating an offer. Beta software, not independently audited.'
         })
         write(out / 'docker-compose.yml', {'services': {
             'app_proxy': {'environment': {'APP_HOST': app + '_wallet_1', 'APP_PORT': '3000'}},
@@ -47,7 +47,7 @@ def package(platform, image, destination, app='paperclip-wallet'):
         (out / 'data/.gitkeep').touch()
     elif platform == 'startos':
         manifest = {
-            'id': app, 'title': 'Paperclip Wallet Beta', 'version': '0.7.7.0', 'license': 'MIT',
+            'id': app, 'title': 'Paperclip Wallet Beta', 'version': '0.8.0.0', 'license': 'MIT',
             'release-notes': 'Beta package for StartOS 0.3.5 only. Paperclip server preset. Not compatible with StartOS 0.4.',
             'wrapper-repo': 'https://github.com/connorslab/paperclip-wallet-app',
             'upstream-repo': 'https://github.com/connorslab/paperclip-wallet-app',

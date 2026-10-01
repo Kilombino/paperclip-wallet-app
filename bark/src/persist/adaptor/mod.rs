@@ -57,10 +57,9 @@ use bdk_core::Merge;
 #[cfg(feature = "onchain-bdk")]
 use bdk_wallet::ChangeSet;
 use chrono::{DateTime, Local};
-use lightning_invoice::Bolt11Invoice;
 use serde::{de::DeserializeOwned, Serialize};
 
-use ark::lightning::{PaymentHash, Preimage};
+use ark::lightning::{Invoice, PaymentHash, Preimage};
 use ark::{Vtxo, VtxoId};
 use ark::vtxo::Full;
 
@@ -1064,7 +1063,7 @@ impl <S: StorageAdaptor> BarkPersister for StorageAdaptorWrapper<S> {
 		&self,
 		payment_hash: PaymentHash,
 		preimage: Preimage,
-		invoice: &Bolt11Invoice,
+		invoice: &Invoice,
 		amount: Amount,
 	) -> anyhow::Result<()> {
 		let key = payment_hash.to_byte_array();

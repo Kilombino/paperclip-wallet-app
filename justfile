@@ -5,3 +5,6 @@ checks:
 
 unit filter="":
 	cargo test --locked -p ark-lib -p bark-bitcoin-ext --lib {{filter}}
+
+unit-wallet filter="":
+	cargo test --locked -p bark-wallet --features onchain-bdk --lib {{filter}}

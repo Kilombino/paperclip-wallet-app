@@ -37,6 +37,7 @@ pub(crate) const BASE_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 /// variant's payload type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WalletActionCheckpoint {
+	LightningOffer(crate::lightning::offers::LightningOffer),
 	LightningSend(LightningSend),
 	LightningReceive(LightningReceive),
 	ArkoorSend(ArkoorSend),
@@ -47,6 +48,7 @@ pub enum WalletActionCheckpoint {
 impl WalletActionCheckpoint {
 	pub fn id(&self) -> WalletActionId {
 		match self {
+			WalletActionCheckpoint::LightningOffer(_) => crate::lightning::offers::OFFER_CHECKPOINT.into(),
 			WalletActionCheckpoint::LightningSend(s) => s.id(),
 			WalletActionCheckpoint::LightningReceive(r) => r.id(),
 			WalletActionCheckpoint::ArkoorSend(s) => s.id(),

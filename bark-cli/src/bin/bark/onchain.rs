@@ -26,6 +26,17 @@ fn cast_bdk_mut(w: &mut dyn OnchainWalletTrait) -> anyhow::Result<&mut OnchainWa
 
 #[derive(clap::Subcommand)]
 pub enum OnchainCommand {
+	/// Sign an exact UTF-8 message with an owned on-chain Taproot address (BIP322).
+	SignMessage {
+		address: bitcoin::Address<address::NetworkUnchecked>,
+		message: String,
+	},
+	/// Verify a BIP322-simple on-chain Taproot address proof.
+	VerifyMessage {
+		address: bitcoin::Address<address::NetworkUnchecked>,
+		message: String,
+		signature: String,
+	},
 	/// Get the on-chain balance
 	#[command()]
 	Balance {
@@ -104,6 +115,19 @@ pub async fn execute_onchain_command(onchain_command: OnchainCommand, wallet: &W
 	let onchain = wallet.onchain().context("no onchain wallet configured")?;
 
 	match onchain_command {
+		OnchainCommand::SignMessage { address, message } => {
+			let address = address.require_network(net)?;
+			let guard = onchain.read().await;
+			let signature = cast_bdk(&*guard)?.sign_onchain_message(&address, &message)?;
+			output_json(&bark_json::web::OnchainMessageProof {
+				address: address.to_string(), message, signature, scheme: "bip322-simple".into(),
+			});
+		},
+		OnchainCommand::VerifyMessage { address, message, signature } => {
+			let address = address.require_network(net)?;
+			let valid = bark::onchain::message::verify_onchain_message(&address, &message, &signature)?;
+			output_json(&bark_json::web::OnchainMessageVerification { valid });
+		},
 		OnchainCommand::Balance { no_sync } => {
 			if !no_sync {
 				info!("Syncing wallet...");

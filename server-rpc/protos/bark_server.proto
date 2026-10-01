@@ -47,6 +47,9 @@ service ArkService {
 
 	// * RECEIVE LN payments
 
+	rpc GetLightningOfferInfo(core.Empty) returns (LightningOfferInfo) {}
+	rpc ServeLightningOffers(stream LightningOfferClient) returns (stream LightningOfferServer) {}
+	rpc RegisterBolt12Receive(RegisterBolt12ReceiveRequest) returns (core.Empty) {}
 	rpc StartLightningReceive(StartLightningReceiveRequest) returns (StartLightningReceiveResponse) {}
 	rpc CheckLightningReceive(CheckLightningReceiveRequest) returns (CheckLightningReceiveResponse) {}
 	rpc PrepareLightningReceiveClaim(PrepareLightningReceiveClaimRequest) returns (PrepareLightningReceiveClaimResponse) {}
@@ -689,4 +692,28 @@ message WalletStatusResponse {
 
 message LightningNodeUri {
 	string uri = 1;
+}
+
+// A reusable offer is signed by the wallet, and serviced while its daemon is online.
+message LightningOfferInfo {
+ bytes relay_pubkey = 1;
+ uint64 maximum_sat = 2;
+ uint32 block_height = 3;
+}
+message LightningOfferClient {
+ string offer = 1;
+ bytes challenge_signature = 2;
+ bytes request_id = 3;
+ string invoice = 4;
+ string error = 5;
+}
+message LightningOfferServer {
+ bytes challenge = 1;
+ bytes request_id = 2;
+ bytes invoice_request = 3;
+}
+message RegisterBolt12ReceiveRequest {
+ string invoice = 1;
+ uint32 min_cltv_delta = 2;
+ optional bytes mailbox_id = 3;
 }

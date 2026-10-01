@@ -184,6 +184,7 @@ impl Wallet {
 
 		for action in self.inner.db.get_all_wallet_action_checkpoints().await? {
 			match &action {
+				WalletActionCheckpoint::LightningOffer(_) => {},
 				WalletActionCheckpoint::LightningSend(a) => {
 					balance.pending_lightning_send += held_by(a, &vtxos, &mut counted);
 				},

@@ -6,9 +6,9 @@ let lightningEnabled = false;
 let setupPending = false;
 const $ = id => document.getElementById(id);
 const status = text => { $('status').textContent = text; };
-async function api(path, body) {
+async function api(path, body, method) {
   const response = await fetch('/api/v1/' + path, {
-    method: body === undefined ? 'GET' : 'POST', cache: 'no-store', redirect: 'error',
+    method: method || (body === undefined ? 'GET' : 'POST'), cache: 'no-store', redirect: 'error',
     headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
     ...(body === undefined ? {} : {body: JSON.stringify(body)})
   });
@@ -106,7 +106,7 @@ $('setup-lock').onclick = () => {
 };
 $('lock').onclick = () => { token = ''; network = null; $('network').textContent = 'NETWORK UNVERIFIED'; $('deposit-address').textContent = ''; $('exits').textContent = '';  $('wallet').hidden = true; $('login').hidden = false; $('vtxos').textContent = ''; $('address').textContent = ''; $('destination').value = ''; status('Wallet locked.'); };
 $('reload').onclick = event => run(event.target, async () => { await update(); status('Balances updated.'); });
-$('receive').onclick = event => run(event.target, async () => { const result = await api('wallet/addresses/next', {}); $('address').textContent = result.address; status('New Ark receive address.'); });
+$('receive').onclick = event => run(event.target, async () => { const receiveSession = token; const result = await api('wallet/addresses/next', {}); if (!token || token !== receiveSession || $('wallet').hidden) return; $('address').textContent = result.address; PaperclipReceive.show('address', result.address, 'Receive on Ark'); status('New Ark receive address.'); });
 $('send').addEventListener('submit', event => { event.preventDefault(); run(event.submitter, async () => {
   const destination = $('destination').value.trim(), amount = Number($('amount').value);
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('Enter a positive whole number of sats.');
@@ -187,11 +187,14 @@ $('ln-pay').onsubmit = event => { event.preventDefault(); run(event.submitter, a
 }); };
 $('ln-receive').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
   if (!lightningEnabled) throw new Error('Lightning is not enabled in this wallet recovery profile.');
+  const receiveSession = token;
   const amount = sats('ln-receive-amount');
   const result = await mutate('lightning/receives/invoice', {
     amount_sat: amount, description: $('ln-description').value.trim() || null, token: null
   });
-  $('ln-invoice').textContent = result.invoice; $('ln-copy').hidden = false;
+  if (!token || token !== receiveSession || $('wallet').hidden) return;
+  $('ln-invoice').textContent = result.invoice; $('ln-copy').hidden = true;
+  PaperclipReceive.show('ln-invoice', result.invoice, 'Receive Lightning into Ark');
   paymentSummary('Awaiting payment', 'Share this invoice. Keep the wallet online until settlement completes.');
   $('ln-identifier').value = result.invoice; $('ln-direction').value = 'receives';
   status('Invoice created. A payment is not settled until the wallet reports completion.');
@@ -218,12 +221,15 @@ $('lock').onclick = () => {
   lockSession();
   $('ark-estimate').hidden = true; $('ark-estimate-values').textContent = '';
   lightningEnabled = false; $('ln-controls').disabled = true;
-  for (const id of ['ln-invoice', 'ln-result', 'chain-result', 'history', 'ark-balance', 'chain-balance']) $(id).textContent = '';
-  for (const id of ['ln-destination', 'ln-amount', 'ln-receive-amount', 'ln-description', 'ln-identifier', 'chain-destination', 'chain-amount']) $(id).value = '';
+  for (const id of ['ln-offer-output', 'ln-invoice', 'ln-result', 'chain-result', 'history', 'ark-balance', 'chain-balance']) $(id).textContent = '';
+  for (const id of ['offer-description', 'offer-amount', 'ln-destination', 'ln-amount', 'ln-receive-amount', 'ln-description', 'ln-identifier', 'chain-destination', 'chain-amount']) $(id).value = '';
 };
 $('deposit').onclick = event => run(event.target, async () => {
+  const receiveSession = token;
   const result = await api('onchain/addresses/next', {});
+  if (!token || token !== receiveSession || $('wallet').hidden) return;
   $('deposit-address').textContent = result.address;
+  PaperclipReceive.show('deposit-address', result.address, 'Receive on-chain XBT');
   status('Deposit address for ' + (network === 'bitcoin' ? 'XBT mainnet' : 'regtest') + '.');
 });
 $('board').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
@@ -276,7 +282,7 @@ function renderActivity(records) {
   }
 }
 const reviewLock = $('lock').onclick;
-$('lock').onclick = () => { reviewLock(); $('activity-list').replaceChildren(); $('activity-summary').textContent = ''; $('payment-summary').textContent = ''; $('payment-summary').hidden = true; $('ln-copy').hidden = true; };
+$('lock').onclick = () => { reviewLock(); PaperclipReceive.clear(); $('activity-list').replaceChildren(); $('activity-summary').textContent = ''; $('payment-summary').textContent = ''; $('payment-summary').hidden = true; $('ln-copy').hidden = true; };
 
 // A session belongs to one browser tab. Never save keys or RPC credentials here.
 function sessionRead(key) { try { return sessionStorage.getItem(key); } catch { return null; } }
@@ -352,3 +358,69 @@ $('vtxo-filter').onchange = renderVtxos;
 $('vtxo-update').onclick = event => run(event.target,async()=>{await update();status('VTXOs updated.');});
 const vtxoLock = $('lock').onclick;
 $('lock').onclick = () => { vtxoLock();vtxoRenderKey='';vtxoSnapshot={balance:{},rows:[],tip:null};$('vtxo-list').replaceChildren();$('vtxo-summary').replaceChildren();$('vtxo-tip').textContent=''; };
+
+function showOffer(offer) {
+  $('offer-state').textContent = offer?.active ? 'Enabled while wallet service is online' : 'Disabled';
+  $('offer-disable').hidden = !offer?.active;
+  $('ln-offer-output').textContent = offer?.offer || 'No reusable offer yet.';
+  if (offer?.active) PaperclipReceive.show('ln-offer-output', offer.offer, 'Reusable XBT Lightning offer');
+}
+
+let messageProof = null;
+function clearMessageProof() {
+  messageProof = null; $('message-proof').hidden = true;
+  $('message-signature').textContent = ''; $('message-verification').textContent = '';
+}
+function messageInput() {
+  return {address: $('message-address').value.trim(), message: $('message-text').value};
+}
+$('message-address').oninput = clearMessageProof;
+$('message-text').oninput = clearMessageProof;
+$('message-verify-signature').oninput = () => { $('message-verification').textContent = ''; };
+$('onchain-message').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
+  clearMessageProof();
+  const input = messageInput(), session = token;
+  if (!confirm('Sign this exact message for ' + input.address + '?\n\n' + input.message + '\n\nThis proves address ownership. No funds will move.')) return;
+  const proof = await api('onchain/message/sign', input);
+  if (!token || token !== session || JSON.stringify(input) !== JSON.stringify(messageInput())) return;
+  if (proof.scheme !== 'bip322-simple' || proof.message !== input.message || proof.address?.toLowerCase() !== input.address.toLowerCase() || typeof proof.signature !== 'string' || !proof.signature.startsWith('smp')) throw new Error('Unexpected message proof response.');
+  messageProof = proof;
+  $('message-signature').textContent = proof.signature; $('message-proof').hidden = false;
+  status('Message signed. Share the exact message, address, and signature with the verifier.');
+}); };
+$('message-copy').onclick = event => run(event.target, async () => {
+  if (!messageProof || !token) throw new Error('Sign a message first.');
+  await PaperclipReceive.copy(messageProof.signature);
+  status('Signature copied.');
+});
+$('message-verify').onclick = event => run(event.target, async () => {
+  const input = {...messageInput(), signature: $('message-verify-signature').value.trim()}, session = token;
+  $('message-verification').textContent = '';
+  const result = await api('onchain/message/verify', input);
+  if (!token || token !== session || input.address !== messageInput().address || input.message !== messageInput().message || input.signature !== $('message-verify-signature').value.trim()) return;
+  $('message-verification').textContent = result.valid ? 'Valid: this signature proves control of the address for the exact message.' : 'Invalid: the address, message, and signature do not match.';
+});
+const messageLock = $('lock').onclick;
+$('lock').onclick = () => {
+  messageLock(); clearMessageProof();
+  $('message-address').value = ''; $('message-text').value = ''; $('message-verify-signature').value = '';
+};
+$('ln-offer').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
+  if (!lightningEnabled) throw new Error('Lightning is not enabled in this wallet recovery profile.');
+  const session = token;
+  const offer = await mutate('lightning/offers', {description: $('offer-description').value.trim(), amount_sat: sats('offer-amount', true)});
+  if (!token || token !== session || $('wallet').hidden) return;
+  showOffer(offer); status('Reusable offer saved. Keep the wallet service online to receive.');
+}); };
+$('offer-load').onclick = event => run(event.target, async () => {
+  const session = token, offer = await api('lightning/offers');
+  if (!token || token !== session || $('wallet').hidden) return;
+  showOffer(offer);
+});
+$('offer-disable').onclick = event => run(event.target, async () => {
+  if (!confirm('Disable this offer for new requests? Payments already in progress will remain tracked.')) return;
+  const session = token;
+  await api('lightning/offers', undefined, 'DELETE');
+  if (!token || token !== session || $('wallet').hidden) return;
+  PaperclipReceive.clear(); showOffer(null); status('Offer disabled. Existing payments remain tracked.');
+});

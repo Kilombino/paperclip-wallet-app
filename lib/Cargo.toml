@@ -31,6 +31,7 @@ lazy_static.workspace = true
 thiserror.workspace = true
 lightning-invoice.workspace = true
 lightning.workspace = true
+chacha20poly1305 = "0.10.1"
 # can use bitcoin::hex once they upgrade to v0.3.0
 hex-conservative = "0.3.0"
 

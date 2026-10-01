@@ -724,7 +724,7 @@ impl From<&LightningReceive> for LightningReceiveInfo {
 			state: state.to_string(),
 			invoice: recv.invoice.to_string(),
 			payment_preimage: Some(recv.payment_preimage),
-			amount: recv.invoice.amount_milli_satoshis()
+			amount: recv.invoice.amount_msat()
 				.map(Amount::from_msat_floor)
 				.expect("generated invoice with no amount"),
 			htlc_vtxo_ids,

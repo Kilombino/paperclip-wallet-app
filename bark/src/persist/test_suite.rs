@@ -866,7 +866,7 @@ pub async fn test_paid_invoice_get_missing(db: &impl BarkPersister) {
 pub async fn test_settled_lightning_receive_record_and_get(db: &impl BarkPersister) {
 	let hash = settled_receive_hash();
 	let preimage = test_preimage();
-	let invoice = test_bolt11();
+	let invoice = test_invoice();
 	let amount = Amount::from_sat(12_345);
 
 	db.record_settled_lightning_receive(hash, preimage, &invoice, amount).await.unwrap();
@@ -876,12 +876,20 @@ pub async fn test_settled_lightning_receive_record_and_get(db: &impl BarkPersist
 	assert_eq!(stored.preimage, preimage, "preimage round-trip");
 	assert_eq!(stored.invoice, invoice, "invoice round-trip");
 	assert_eq!(stored.amount, amount, "amount round-trip");
+
+	let encoded = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/testdata/bolt12-invoice.txt")).trim();
+	let invoice = Invoice::from_str(encoded).unwrap();
+	let hash = invoice.payment_hash();
+	db.record_settled_lightning_receive(hash, preimage, &invoice, amount).await.unwrap();
+	let stored = db.get_settled_lightning_receive(hash).await.unwrap().unwrap();
+	assert_eq!(stored.invoice.to_string(), encoded, "BOLT12 settlement survives reload");
+	assert_eq!(stored.preimage, preimage, "BOLT12 recovery secret survives reload");
 }
 
 pub async fn test_settled_lightning_receive_record_is_idempotent(db: &impl BarkPersister) {
 	let hash = settled_receive_hash();
 	let preimage = test_preimage();
-	let invoice = test_bolt11();
+	let invoice = test_invoice();
 
 	db.record_settled_lightning_receive(hash, preimage, &invoice, Amount::from_sat(12_345))
 		.await.unwrap();

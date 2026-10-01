@@ -176,7 +176,7 @@ impl Wallet {
 	{
 		let invoice = invoice.try_into().context("failed to parse invoice")?;
 		let amount = invoice.get_payment_amount(user_amount)?;
-		info!("Sending bolt11 payment of {} to invoice {}", amount, invoice);
+		info!("Sending Lightning payment of {} to invoice {}", amount, invoice);
 		self.make_lightning_payment(&invoice, invoice.clone().into(), user_amount, wait).await?;
 		Ok(invoice)
 	}
