@@ -1,7 +1,7 @@
 use anyhow::Context;
 use bitcoin::{Amount, NetworkKind};
 use bitcoin::hex::DisplayHex;
-use bitcoin::secp256k1::Keypair;
+use bitcoin::secp256k1::{Keypair, PublicKey};
 use log::{error, info, warn};
 
 use ark::{ProtocolEncoding, VtxoPolicy};
@@ -311,7 +311,14 @@ impl Wallet {
 		destination: &ark::Address,
 		amount: Amount,
 	) -> anyhow::Result<()> {
-		let action = start_arkoor_send(self, destination.clone(), amount).await?;
+		self.send_arkoor_payment_with_max_cost(destination, amount, None).await
+	}
+
+	/// Send with an optional upper bound on the amount plus recovery reserve.
+	pub async fn send_arkoor_payment_with_max_cost(
+		&self, destination: &ark::Address, amount: Amount, max_total: Option<Amount>,
+	) -> anyhow::Result<()> {
+		let action = start_arkoor_send(self, destination.clone(), amount, max_total).await?;
 
 		// Persist the action together with the input locks so the executor has
 		// something to drive on restart; otherwise a crash between this point and
@@ -320,6 +327,43 @@ impl Wallet {
 		self.inner.db.upsert_wallet_action_checkpoint(&action.id, &action.clone().into()).await?;
 
 		self.drive_action(action, DriveMode::UntilDone).await
+	}
+
+	/// Read-only plan shared by estimates and sends. No keys, locks or signatures are created.
+	pub(crate) async fn plan_arkoor_payment(
+		&self, amount: Amount, policy: VtxoPolicy, change: PublicKey,
+	) -> anyhow::Result<(Vec<WalletVtxo>, Amount)> {
+		self.inner.chain.require_funded_policy().await?;
+		let _ = self.require_server().await?;
+		ensure!(amount > Amount::ZERO, "payment amount must be positive");
+		let tip = self.inner.chain.tip().await?;
+		let candidates = self.spendable_vtxos().await?;
+		let selection = self.spend_input_selection().await?.expires_after(tip);
+		let mut inputs = selection.select(candidates.clone(), amount)?;
+		let reserve = ark::exit_policy::paperclip_funding().per_transaction();
+		loop {
+			let count = u64::try_from(inputs.len()).context("input count overflow")?;
+			let required = amount.checked_add(reserve.checked_mul(
+				count.checked_mul(3).context("recovery reserve overflow")?,
+			).context("recovery reserve overflow")?).context("payment amount overflow")?;
+			let selected = selection.select(candidates.clone(), required)?;
+			let same_count = selected.len() == inputs.len();
+			inputs = selected;
+			if same_count { break; }
+		}
+		let ids = inputs.iter().map(|v| v.id()).collect::<Vec<_>>();
+		let full = self.inner.db.get_full_vtxos(&ids).await?;
+		for input in &full {
+			self.validate_funded_admission(input).await?;
+			let deadline = u32::try_from(input.exit_depth()).context("exit depth overflow")?
+				.checked_add(u32::from(input.exit_delta().to_u16()) + 14)
+				.and_then(|v| v.checked_add(tip.to_u32())).context("exit deadline overflow")?;
+			ensure!(deadline < input.expiry_height().to_u32(), "refresh required before another transfer");
+		}
+		let (_, recovery_reserve) = ArkoorPackageBuilder::new_funded_payment(
+			full, ArkoorDestination { total_amount: amount, policy }, VtxoPolicy::new_pubkey(change),
+		).context("payment would leave an unfunded or dust recovery output; refresh first")?;
+		Ok((inputs, recovery_reserve))
 	}
 
 	/// Returns every in-progress arkoor send checkpoint.

@@ -15,6 +15,7 @@ use crate::error::{self, HandlerResult, ContextExt, badarg};
 #[openapi(
 	paths(
 		onchain_fee_rates,
+		ark_send_fee,
 		board_fee,
 		send_onchain_fee,
 		offboard_all_fee,
@@ -23,6 +24,8 @@ use crate::error::{self, HandlerResult, ContextExt, badarg};
 		lightning_receive_fee,
 	),
 	components(schemas(
+		bark_json::web::ArkSendEstimateRequest,
+		bark_json::web::ArkSendEstimateResponse,
 		bark_json::web::FeeEstimateQuery,
 		bark_json::web::SendOnchainFeeEstimateQuery,
 		bark_json::web::OffboardAllFeeEstimateQuery,
@@ -36,6 +39,7 @@ pub struct FeesApiDoc;
 
 pub fn router() -> Router<Arc<ServerState>> {
 	Router::new()
+		.route("/ark/send", post(ark_send_fee))
 		.route("/onchain", get(onchain_fee_rates))
 		.route("/board", get(board_fee))
 		.route("/send-onchain", get(send_onchain_fee))
@@ -289,4 +293,41 @@ pub async fn lightning_receive_fee(
 		.context("Failed to estimate lightning receive fee")?;
 
 	Ok(axum::Json(estimate.into()))
+}
+
+#[utoipa::path(
+	post,
+	path = "/ark/send",
+	summary = "Estimate the full Ark-send cost without sending",
+	request_body = bark_json::web::ArkSendEstimateRequest,
+	responses(
+		(status = 200, description = "Current input selection and full debit", body = bark_json::web::ArkSendEstimateResponse),
+		(status = 400, description = "Invalid destination or amount", body = error::BadRequestError),
+		(status = 500, description = "Cannot construct payment; inspect error details", body = error::InternalServerError)
+	),
+	description = "Read-only preview. Does not lock inputs, allocate keys, sign or send. Recovery reserves reduce spendable funds and are not separately refundable deposits. Insufficient funds, dust and refresh requirements return an error, never a zero-cost quote. Send total_debit_sat as max_total_sat to wallet/send to cap the approved debit. Estimates do not reserve funds.",
+	tag = "fees"
+)]
+#[debug_handler]
+pub async fn ark_send_fee(
+	State(state): State<Arc<ServerState>>,
+	Json(body): Json<bark_json::web::ArkSendEstimateRequest>,
+) -> HandlerResult<Json<bark_json::web::ArkSendEstimateResponse>> {
+	let wallet = state.require_wallet()?;
+	if body.amount_sat == 0 { badarg!("amount must be positive"); }
+	let destination = ark::Address::from_str(&body.destination).badarg("invalid Ark address")?;
+	wallet.validate_arkoor_address(&destination).await.badarg("invalid Ark destination")?;
+	let estimate = wallet.estimate_arkoor_send(&destination, Amount::from_sat(body.amount_sat)).await
+		.context("Cannot estimate Ark send")?;
+	let remaining = wallet.balance().await?.spendable.checked_sub(estimate.gross_amount)
+		.context("wallet balance changed; request a new estimate")?;
+	Ok(Json(bark_json::web::ArkSendEstimateResponse {
+		recipient_amount_sat: estimate.net_amount.to_sat(),
+		recovery_reserve_sat: estimate.fee.to_sat(),
+		service_fee_sat: 0,
+		total_debit_sat: estimate.gross_amount.to_sat(),
+		remaining_spendable_sat: remaining.to_sat(),
+		input_count: estimate.vtxos_spent.len(),
+		vtxos_spent: estimate.vtxos_spent.iter().map(ToString::to_string).collect(),
+	}))
 }

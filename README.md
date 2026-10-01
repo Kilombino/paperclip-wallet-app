@@ -5,7 +5,7 @@ contributors. This edition presets new wallets to **https://ark.paperclippool.xy
 Existing wallet configuration is preserved. Wallet keys stay on your device.
 
 **Public beta. Paperclip Ark is open for XBT deposits, Ark transfers, and Lightning payments.**
-Use wallet **0.7.6 or later**. Check [service status](https://ark.paperclippool.xyz/) before funding.
+Use wallet **0.7.7 or later**. Check [service status](https://ark.paperclippool.xyz/) before funding.
 
 Current beta limits: boarding starts at **20,000 sats**; Lightning payments are
 limited to **250,000 sats**. Fees and recovery reserves apply. Very small Lightning
@@ -17,13 +17,34 @@ payments can be below the funded-HTLC minimum. The server can change these limit
 experimental and provided without warranty. Functional tests are not a security
 audit. Bugs can cause loss of funds. Use only amounts you can afford to lose.
 
-## What changed in 0.7.6
+## What changed in 0.7.7
 
-Adds explicit unaudited-code warnings and a setup acknowledgment. Includes the
+Adds an accurate Ark-send cost preview and an approved debit limit. Retains
+unaudited-code warnings and the setup acknowledgment. Includes the
 0.7.5 interface improvements: clearer Lightning send and receive flows, readable activity and VTXO dashboards,
 block-based expiry warnings, and guided recovery controls. Optional tab-scoped
 sessions survive page refresh; Lock clears the saved token. Visible tabs refresh
 balances without resubmitting payments. Reduced-motion settings are respected.
+
+## Ark-send cost preview
+
+Before an Ark transfer, the wallet shows the recipient amount, recovery reserve,
+service fee, total balance reduction, and estimated remaining spendable balance.
+Recovery reserves are not separately refundable deposits. Small transfers can
+have a high reserve relative to the payment amount.
+
+Authenticated clients can use `POST /api/v1/fees/ark/send` with
+`{"destination":"<Ark address>","amount_sat":10000}`. This read-only endpoint
+uses the same input selection and funded transaction builder as a send. It does
+not allocate keys, lock funds, request signatures, or submit a payment.
+
+The response includes `recipient_amount_sat`, `recovery_reserve_sat`,
+`service_fee_sat`, `total_debit_sat`, `remaining_spendable_sat`, `input_count`,
+and `vtxos_spent`. Insufficient funds, dust and required refreshes return an error;
+they do not produce a zero-cost estimate. Wallet state can change after a quote.
+Pass the approved `total_debit_sat` as `max_total_sat` to `POST /api/v1/wallet/send`
+to reject a higher debit before signing. This optional limit is for Ark sends
+only. The web interface always supplies it. No funds are reserved by a quote.
 
 ## Features
 
@@ -47,8 +68,8 @@ The [StartOS 0.4 wrapper](https://github.com/connorslab/paperclip-wallet-startos
 
 Current releases:
 
-- [Umbrel community store](https://github.com/connorslab/paperclip-umbrel-app-store): wallet 0.7.6, with a pinned image.
-- [StartOS 0.4 installers](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.7.6-beta.1): x86-64 and ARM64 beta packages.
+- [Umbrel community store](https://github.com/connorslab/paperclip-umbrel-app-store): wallet 0.7.7, with a pinned image.
+- [StartOS 0.4 installers](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.7.7-beta.1): x86-64 and ARM64 beta packages.
 
 See [platform instructions](deployment/PLATFORMS.md) for authentication,
 backend setup, packaging, and restore requirements.
@@ -72,7 +93,7 @@ retains explicit network selection and mainnet opt-in outside platform packages.
 
 ## Verification status
 
-Native amd64 and arm64 images pass startup checks. Umbrel 0.7.6 is deployed
+Native amd64 and arm64 images pass startup checks. Umbrel 0.7.7 is deployed
 and healthy. StartOS 0.4 packages build and pass manifest validation; device
 setup and backup/restore verification remain in progress.
 

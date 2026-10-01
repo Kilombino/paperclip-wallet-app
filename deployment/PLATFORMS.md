@@ -1,12 +1,12 @@
 # Paperclip Wallet on Umbrel and StartOS
 
-Paperclip Ark is open in public beta. Use wallet 0.7.6 or later.
-Native amd64 and arm64 images pass startup checks. Umbrel 0.7.6 is deployed
+Paperclip Ark is open in public beta. Use wallet 0.7.7 or later.
+Native amd64 and arm64 images pass startup checks. Umbrel 0.7.7 is deployed
 and healthy. StartOS 0.4 installer builds and manifests are verified; device
 setup and backup/restore tests remain in progress.
 
 Install from the [Umbrel community store](https://github.com/connorslab/paperclip-umbrel-app-store)
-or the [StartOS 0.4 release](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.7.6-beta.1).
+or the [StartOS 0.4 release](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.7.7-beta.1).
 The source container targets Linux amd64 and arm64. Current StartOS 0.4 packages use https://github.com/connorslab/paperclip-wallet-startos. The generator below retains a legacy 0.3.5 wrapper for reference; it is not the 0.4 package.
 
 ## Setup

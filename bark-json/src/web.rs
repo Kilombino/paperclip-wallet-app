@@ -104,6 +104,27 @@ impl From<bark::FeeEstimate> for FeeEstimateResponse {
 	}
 }
 
+/// Read-only Ark-send estimate. Amounts are sats; no funds or keys are reserved.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+pub struct ArkSendEstimateRequest {
+	pub destination: String,
+	pub amount_sat: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+pub struct ArkSendEstimateResponse {
+	pub recipient_amount_sat: u64,
+	pub recovery_reserve_sat: u64,
+	pub service_fee_sat: u64,
+	pub total_debit_sat: u64,
+	/// Snapshot only. Concurrent wallet activity can change this balance.
+	pub remaining_spendable_sat: u64,
+	pub input_count: usize,
+	pub vtxos_spent: Vec<String>,
+}
+
 /// Query parameters for emergency (unilateral) exit fee estimates.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
@@ -411,6 +432,10 @@ pub struct BoardRequest {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
 pub struct SendRequest {
+	/// Optional maximum debit, including recovery reserves. Supported for Ark addresses only.
+	/// The send recomputes its cost and rejects an increase above this limit before signing.
+	#[serde(default)]
+	pub max_total_sat: Option<u64>,
 	/// The destination can be an Ark address, a BOLT11-invoice, LNURL or a lightning address
 	pub destination: String,
 	/// The amount to send (in satoshis). Optional for bolt11 invoices. Depending on the

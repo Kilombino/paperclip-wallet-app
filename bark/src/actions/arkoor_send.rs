@@ -250,6 +250,7 @@ pub(crate) async fn start_arkoor_send(
 	wallet: &Wallet,
 	destination: ark::Address,
 	amount: Amount,
+	max_total: Option<Amount>,
 ) -> anyhow::Result<ArkoorSend> {
 	wallet.inner.chain.require_funded_policy().await?;
 	let _ = wallet.require_server().await?;
@@ -261,31 +262,13 @@ pub(crate) async fn start_arkoor_send(
 	if destination.policy().user_pubkey() == change_keypair.public_key() {
 		bail!("Cannot create arkoor to same address as change");
 	}
+	let (inputs, recovery_reserve) = wallet.plan_arkoor_payment(
+		amount, destination.policy().clone(), change_keypair.public_key(),
+	).await?;
+	check_send_cost(amount, recovery_reserve, max_total)?;
+	let input_vtxo_ids = inputs.iter().map(|v| v.id()).collect::<Vec<_>>();
 	wallet.inner.db.store_vtxo_key(change_key_index, change_keypair.public_key()).await
 		.context("failed to store arkoor change keypair")?;
-
-	// The server refuses expired vtxos as arkoor inputs; they have to wait
-	// for a refresh.
-	let tip = wallet.inner.chain.tip().await?;
-	let mut inputs = wallet.spend_input_selection().await?
-		.expires_after(tip)
-		.select(wallet.spendable_vtxos().await?, amount)?;
-	let reserve = ark::exit_policy::paperclip_funding().per_transaction();
-	loop {
-		let required = amount.checked_add(reserve.checked_mul(3 * inputs.len() as u64)
-			.context("recovery reserve overflow")?).context("payment amount overflow")?;
-		let selected = wallet.spend_input_selection().await?.expires_after(tip)
-			.select(wallet.spendable_vtxos().await?, required)?;
-		let same_count = selected.len() == inputs.len();
-		inputs = selected;
-		if same_count { break; }
-	}
-	let input_vtxo_ids = inputs.iter().map(|v| v.id()).collect::<Vec<_>>();
-	let full = wallet.inner.db.get_full_vtxos(&input_vtxo_ids).await?;
-	ark::arkoor::package::ArkoorPackageBuilder::new_funded_payment(
-		full, ArkoorDestination { total_amount: amount, policy: destination.policy().clone() },
-		ark::VtxoPolicy::new_pubkey(change_keypair.public_key()),
-	).context("payment would leave an unfunded or dust recovery output; refresh first")?;
 
 	let total_input = inputs.iter().map(|v| v.amount()).sum::<Amount>();
 	let change = total_input.checked_sub(amount)
@@ -490,5 +473,30 @@ mod test {
 		let advance: AdvanceError = ArkoorCreateError::Other(anyhow!("db error")).into();
 		assert!(matches!(advance, AdvanceError::Other(_)));
 		assert!(!advance.is_server_rejection());
+	}
+}
+
+/// Check the user's approved debit before keys or input locks are persisted.
+fn check_send_cost(amount: Amount, reserve: Amount, max_total: Option<Amount>) -> anyhow::Result<()> {
+	let total = amount.checked_add(reserve).context("payment amount overflow")?;
+	if let Some(limit) = max_total {
+		ensure!(total <= limit, "Ark send cost changed; request a new estimate before payment");
+	}
+	Ok(())
+}
+
+#[cfg(test)]
+mod cost_tests {
+	use super::*;
+
+	#[test]
+	fn approved_debit_cannot_increase() {
+		let amount = Amount::from_sat(10_000);
+		let reserve = Amount::from_sat(6_000);
+		assert!(check_send_cost(amount, reserve, Some(Amount::from_sat(16_000))).is_ok());
+		assert!(check_send_cost(amount, reserve, Some(Amount::from_sat(15_999))).is_err());
+		assert!(check_send_cost(amount, Amount::from_sat(10_000), Some(Amount::from_sat(16_000))).is_err());
+		assert!(check_send_cost(amount, reserve, None).is_ok());
+		assert!(check_send_cost(Amount::MAX, reserve, None).is_err());
 	}
 }

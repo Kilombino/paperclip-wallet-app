@@ -678,6 +678,23 @@ mod test {
 	}
 
 	#[test]
+	fn funded_payment_reserve_depends_on_outputs_and_input_count() {
+		let (_, first) = funded_test_input(Amount::from_sat(20_000));
+		let (_, second) = funded_test_input(Amount::from_sat(30_000));
+		let policy = VtxoPolicy::new_pubkey(bob_public_key());
+		let change = VtxoPolicy::new_pubkey(alice_public_key());
+		let (_, exact) = ArkoorPackageBuilder::new_funded_payment(
+			vec![first.clone()], ArkoorDestination { total_amount: Amount::from_sat(16_000), policy: policy.clone() },
+			change.clone(),
+		).unwrap();
+		assert_eq!(exact.to_sat(), 4_000);
+		let (_, split) = ArkoorPackageBuilder::new_funded_payment(
+			vec![first, second], ArkoorDestination { total_amount: Amount::from_sat(26_000), policy }, change,
+		).unwrap();
+		assert_eq!(split.to_sat(), 10_000);
+	}
+
+	#[test]
 	fn funded_payment_refuses_legacy_dust_and_insufficient_reserves() {
 		let (_, input) = funded_test_input(Amount::from_sat(20_000));
 		for amount in [0, 329, 1000, 14_001, 19_000, 21_000] {

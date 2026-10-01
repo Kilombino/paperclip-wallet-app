@@ -16,7 +16,7 @@ async function api(path, body) {
     let message = '';
     try { const detail = await response.json(); message = typeof detail.message === 'string' ? detail.message.slice(0, 900) : ''; } catch {}
     if (message.includes('no pending lightning receive')) message = 'No received payment matches this invoice in this wallet. An invoice from another wallet belongs in Pay someone, not Received status.';
-    if (message.includes('dust') || message.includes('funded-HTLC minimum')) message = 'Payment cannot be constructed: the HTLC or remaining change is too small after recovery reserves. Check your Ark balance and try a larger payment or refresh eligible inputs.';
+    if (message.includes('dust') || message.includes('funded-HTLC minimum')) message = path === 'fees/ark/send' ? 'Ark payment or change is too small after recovery reserves. Check your balance and amount, or refresh eligible inputs. No payment was sent.' : 'Payment cannot be constructed: the HTLC or remaining change is too small after recovery reserves. Check your Ark balance and try a larger payment or refresh eligible inputs.';
     throw new Error(message || 'Wallet request failed (' + response.status + '). Check wallet access and local services.');
   }
   return response.status === 204 ? null : response.json();
@@ -111,11 +111,34 @@ $('send').addEventListener('submit', event => { event.preventDefault(); run(even
   const destination = $('destination').value.trim(), amount = Number($('amount').value);
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('Enter a positive whole number of sats.');
   if (!network) throw new Error('Unlock and verify the wallet network first.');
-  if (!confirm('Send ' + amount.toLocaleString() + ' sats to:\n' + destination + '\n\nServer fees may apply.')) return;
+  if (uncertainMutation) throw new Error('Check the previous submission in Activity before another payment.');
+  const sessionToken = token;
+  $('ark-estimate').hidden = true;
+  status('Estimating the recipient amount and recovery reserve. No payment has been sent.');
+  const quote = await api('fees/ark/send', {destination, amount_sat: amount});
+  if (token !== sessionToken || !network || $('destination').value.trim() !== destination || Number($('amount').value) !== amount) {
+    throw new Error('Wallet or payment details changed. Review the transfer again.');
+  }
+  const fields = ['recipient_amount_sat', 'recovery_reserve_sat', 'service_fee_sat', 'total_debit_sat', 'remaining_spendable_sat', 'input_count'];
+  if (fields.some(key => !Number.isSafeInteger(quote[key]) || quote[key] < 0) || quote.input_count < 1 ||
+      quote.recipient_amount_sat !== amount || quote.total_debit_sat !== amount + quote.recovery_reserve_sat + quote.service_fee_sat) {
+    throw new Error('Invalid cost estimate. No payment was sent.');
+  }
+  const review = 'Recipient receives: ' + amount.toLocaleString() + ' sats\n' +
+    'Recovery reserve: ' + quote.recovery_reserve_sat.toLocaleString() + ' sats\n' +
+    'Service fee: ' + quote.service_fee_sat.toLocaleString() + ' sats\n' +
+    'Total balance reduction: ' + quote.total_debit_sat.toLocaleString() + ' sats\n' +
+    'Estimated remaining balance: ' + quote.remaining_spendable_sat.toLocaleString() + ' sats';
+  $('ark-estimate-values').textContent = review;
+  $('ark-estimate').hidden = false;
+  if (!confirm(review + '\n\nRecovery reserves are not separately refundable deposits.\n\nSend to:\n' + destination + '?')) {
+    status('Estimate ready. No payment was sent.'); return;
+  }
   status('Submitting once. If the connection fails, check history before trying again.');
-  await mutate('wallet/send', {destination, amount_sat: amount});
-  $('destination').value = ''; $('amount').value = ''; await update(); status('Transfer completed.');
+  await mutate('wallet/send', {destination, amount_sat: amount, max_total_sat: quote.total_debit_sat});
+  $('destination').value = ''; $('amount').value = ''; $('ark-estimate').hidden = true; await update(); status('Transfer completed.');
 }); });
+for (const id of ['destination', 'amount']) $(id).addEventListener('input', () => { $('ark-estimate').hidden = true; });
 $('refresh').onclick = event => run(event.target, async () => {
   if (!confirm('Refresh all eligible VTXOs? Transaction fees may apply.')) return;
   await mutate('wallet/refresh/all', {}); await update(); status('Refresh requested. Wait for confirmation and update to check completion.');
@@ -193,6 +216,7 @@ $('history-load').onclick = event => run(event.target, async () => {
 const lockSession = $('lock').onclick;
 $('lock').onclick = () => {
   lockSession();
+  $('ark-estimate').hidden = true; $('ark-estimate-values').textContent = '';
   lightningEnabled = false; $('ln-controls').disabled = true;
   for (const id of ['ln-invoice', 'ln-result', 'chain-result', 'history', 'ark-balance', 'chain-balance']) $(id).textContent = '';
   for (const id of ['ln-destination', 'ln-amount', 'ln-receive-amount', 'ln-description', 'ln-identifier', 'chain-destination', 'chain-amount']) $(id).value = '';
