@@ -11,3 +11,7 @@ body{background:radial-gradient(ellipse at 85% 0%,#f568350a,transparent 48%),#11
 
 /* Private review build: readable payment states and movement timeline. */
 .step-label{font-size:11px;letter-spacing:2px;color:#f56835;font-weight:700}.payment-summary{padding:20px;margin:20px 0;border:1px solid #f5683566;border-radius:14px;background:linear-gradient(120deg,#f5683512,#17263b);line-height:1.7}.payment-lookup{margin-top:28px}details summary{cursor:pointer;padding:12px 0}.activity-summary{color:#b2bfd2;margin:22px 0}.activity-row{display:grid;grid-template-columns:1fr auto;gap:8px 20px;border:1px solid #35455e;border-radius:14px;padding:20px;margin:12px 0;background:#17263b;animation:card-in .25s ease}.activity-row p{grid-column:1/-1;margin:0;font-size:13px;color:#b2bfd2}.activity-row strong{text-transform:capitalize}.positive{color:#89d7bb}.amount,.positive{font-variant-numeric:tabular-nums}#ln-controls .grid>div{padding:20px;border:1px solid #35455e;border-radius:14px}#status:not(:empty){border-left:3px solid #f56835;padding:16px;background:#17263b;border-radius:8px}button:disabled{cursor:wait;opacity:.55}@media(max-width:640px){.activity-row{grid-template-columns:1fr}.activity-row p{grid-column:1}#ln-controls .grid>div{padding:14px}}@media(prefers-reduced-motion:reduce){.activity-row{animation:none}}
+
+/* Keep notices in flow so they never cover payment controls. */
+#status{position:static;inset:auto}
+
