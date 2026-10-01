@@ -34,7 +34,7 @@ def package(platform, image, destination, app='paperclip-wallet'):
             'support': 'https://github.com/connorslab/paperclip-wallet-app/issues',
             'icon': 'https://raw.githubusercontent.com/connorslab/paperclip-wallet-app/main/web/icon.svg', 'dependencies': [], 'gallery': [], 'path': '', 'defaultUsername': '',
             'deterministicPassword': True, 'submitter': 'Paperclip',
-            'releaseNotes': 'Reusable BOLT12 receiving with a compatible ASP, local receive QR codes, and on-chain message signing. Keep the wallet service online for offer requests. Back up the complete wallet before upgrading; do not downgrade after creating an offer. Beta software, not independently audited.'
+            'releaseNotes': 'Fixes Lightning payments from fragmented Ark balances with builder-validated input selection and cost estimates. Recovery reserves remain enforced. Retains reusable BOLT12, receive QR codes, and message signing. Back up the complete wallet before upgrading. Beta, not independently audited.'
         })
         write(out / 'docker-compose.yml', {'services': {
             'app_proxy': {'environment': {'APP_HOST': app + '_wallet_1', 'APP_PORT': '3000'}},
