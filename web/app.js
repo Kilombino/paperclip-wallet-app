@@ -23,12 +23,14 @@ async function api(path, body) {
 }
 async function update() {
   const sessionToken = token;
-  const [balance, chain, vtxos, exits] = await Promise.all([api('wallet/balance'), api('onchain/balance'), api('wallet/vtxos'), api('exits/status/all')]);
+  const [balance, chain, vtxos, exits, tip] = await Promise.all([api('wallet/balance'), api('onchain/balance'), api('wallet/vtxos'), api('exits/status/all'), api('bitcoin/tip').catch(() => null)]);
   if (!token || token !== sessionToken) return;
   $('exits').textContent = JSON.stringify(exits, null, 2);
   $('ark-balance').textContent = Number.isSafeInteger(balance.spendable_sat) ? balance.spendable_sat.toLocaleString() : 'See details';
   $('chain-balance').textContent = Number.isSafeInteger(chain.confirmed_sat) ? chain.confirmed_sat.toLocaleString() : 'See details';
   $('vtxos').textContent = JSON.stringify({balance, onchain: chain, vtxos}, null, 2);
+  vtxoSnapshot = {balance, rows: Array.isArray(vtxos) ? vtxos : [], tip: Number.isSafeInteger(tip?.tip_height) ? tip.tip_height : null};
+  renderVtxos();
 }
 async function run(button, operation) {
   button.disabled = true;
@@ -284,3 +286,45 @@ setInterval(async () => {
   try { await connectWallet(); }
   catch { token = ''; network = null; sessionWrite('paperclip.session', null); status('Unlock again to reconnect. Your wallet data is unchanged.'); }
 })();
+
+let vtxoSnapshot = {balance: {}, rows: [], tip: null};
+let vtxoRenderKey = '';
+function vtxoNode(tag, text, className) {
+  const node = document.createElement(tag); node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+function renderVtxos() {
+  const {balance, rows, tip} = vtxoSnapshot;
+  const nextKey = JSON.stringify([vtxoSnapshot, $('vtxo-filter').value]);
+  if (nextKey === vtxoRenderKey) return;
+  vtxoRenderKey = nextKey;
+  const openIds = new Set(Array.from($('vtxo-list').querySelectorAll?.('details[open]') || [], d => d.dataset.vtxoId));
+  const summary = $('vtxo-summary'); summary.replaceChildren();
+  const count = rows.length;
+  const locked = rows.filter(r => r.state?.type === 'locked').reduce((sum,r) => sum + (Number.isSafeInteger(r.amount_sat) ? r.amount_sat : 0),0);
+  for (const [label,value] of [['Spendable',balance.spendable_sat],['Needs refresh',balance.needs_refresh_sat],['Locked',locked]]) {
+    const card = vtxoNode('article','');
+    card.append(vtxoNode('span',label),vtxoNode('strong',Number.isSafeInteger(value) ? value.toLocaleString()+' sats' : 'Unavailable')); summary.append(card);
+  }
+  $('vtxo-tip').textContent = tip === null ? 'Chain height unavailable. Expiry blocks are shown without a countdown.' : 'Chain height '+tip.toLocaleString()+' \u00b7 '+count+' current VTXOs. Expiry is measured in blocks, not a guaranteed time.';
+  const list = $('vtxo-list'); list.replaceChildren();
+  const filter = $('vtxo-filter').value || 'all';
+  const shown = rows.filter(r => filter === 'all' || r.state?.type === filter).sort((a,b) => (a.expiry_height ?? Infinity)-(b.expiry_height ?? Infinity));
+  if (!shown.length) { list.append(vtxoNode('p',count ? 'No VTXOs match this filter.' : 'No current VTXOs. Board funds or receive an Ark payment to get started.','empty-state')); return; }
+  for (const row of shown) {
+    const remaining = tip !== null && Number.isSafeInteger(row.expiry_height) ? row.expiry_height-tip : null;
+    const card = vtxoNode('article','','vtxo-card'+(remaining !== null && remaining <=144 ? ' attention' : ''));
+    const top = vtxoNode('div','','vtxo-card-top');
+    top.append(vtxoNode('strong',Number.isSafeInteger(row.amount_sat) ? row.amount_sat.toLocaleString()+' sats' : 'Amount unavailable'),vtxoNode('span',row.state?.type || 'Unknown','state-pill'));
+    const expiry = remaining === null ? 'Countdown unavailable' : remaining <=0 ? 'Expiry reached: review recovery immediately' : remaining.toLocaleString()+' blocks until expiry';
+    card.append(top,vtxoNode('p',expiry,'expiry-label'),vtxoNode('p','Expires at block '+(Number.isSafeInteger(row.expiry_height)?row.expiry_height.toLocaleString():'unknown'),'hint'));
+    if (remaining !== null && remaining >0 && remaining <=144) card.append(vtxoNode('p','Expiry is approaching. Check refresh and recovery status.','hint'));
+    const details = vtxoNode('details',''); details.dataset.vtxoId = String(row.id); details.open = openIds.has(String(row.id)); details.append(vtxoNode('summary','VTXO details'),vtxoNode('pre',JSON.stringify({id:row.id,policy:row.policy_type,exit_delay_blocks:row.exit_delta,exit_depth:row.exit_depth,chain_anchor:row.chain_anchor,state:row.state},null,2)));
+    card.append(details);list.append(card);
+  }
+}
+$('vtxo-filter').onchange = renderVtxos;
+$('vtxo-update').onclick = event => run(event.target,async()=>{await update();status('VTXOs updated.');});
+const vtxoLock = $('lock').onclick;
+$('lock').onclick = () => { vtxoLock();vtxoRenderKey='';vtxoSnapshot={balance:{},rows:[],tip:null};$('vtxo-list').replaceChildren();$('vtxo-summary').replaceChildren();$('vtxo-tip').textContent=''; };

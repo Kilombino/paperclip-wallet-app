@@ -14,7 +14,7 @@ function fixture(network, lightningEnabled = true, empty = false) {
     return elements.get(id);
   };
   let failPath = null;
-  const context = vm.createContext({document: {getElementById: element}, confirm: () => true, URL, btoa, setInterval: () => {}, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+  const context = vm.createContext({document: {getElementById: element, createElement: () => ({textContent:'',append() {}})}, confirm: () => true, URL, btoa, setInterval: () => {}, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     fetch: async (path, options) => {
       calls.push({path, options});
       if (failPath && path.endsWith(failPath)) throw Error('Transport interrupted');
@@ -164,3 +164,12 @@ console.log('PASS: readable empty activity, unknown payment, and lock clears rev
 assert(!/[\u00c2\u00c3\ufffd]/u.test(source + html), 'Text assets must not contain mojibake');
 assert(!/[^\x00-\x7f]/.test(source), 'Use Unicode escapes in JavaScript to avoid encoding conversion');
 console.log('PASS: UI text encoding');
+
+{
+  const f=fixture('bitcoin');
+  vm.runInContext("vtxoSnapshot={balance:{spendable_sat:15000,needs_refresh_sat:0},tip:1000,rows:[]};renderVtxos()",f.context);
+  assert.match(f.element('vtxo-tip').textContent,/1,000/);
+  vm.runInContext("vtxoSnapshot.tip=null;renderVtxos()",f.context);
+  assert.match(f.element('vtxo-tip').textContent,/unavailable/);
+}
+console.log('PASS: VTXO chain height and unavailable-tip handling');
