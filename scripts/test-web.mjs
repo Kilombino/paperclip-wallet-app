@@ -21,6 +21,7 @@ function fixture(network, lightningEnabled = true, empty = false) {
       const result = path.endsWith('/wallet') ? {fingerprint: empty ? null : 'test-fingerprint'}
         : path.endsWith('/wallet/identity') ? {network, exit_profile: 2, lightning_enabled: lightningEnabled}
         : path.endsWith('/fees/ark/send') ? {recipient_amount_sat: JSON.parse(options.body).amount_sat, recovery_reserve_sat: 6000, service_fee_sat: 0, total_debit_sat: JSON.parse(options.body).amount_sat + 6000, remaining_spendable_sat: 92000, input_count: 1, vtxos_spent: ['test-vtxo']}
+        : path.includes('/fees/lightning/pay?') ? {net_amount_sat: Number(path.split('=')[1]), fee_sat: 6000, gross_amount_sat: Number(path.split('=')[1]) + 6000, vtxos_spent: ['test-vtxo']}
         : path.endsWith('/wallet/balance') ? {spendable_sat: 100000}
         : path.endsWith('/onchain/balance') ? {confirmed_sat: 50000}
         : path.endsWith('/addresses/next') ? {address: 'bc1-test-address'}
@@ -274,3 +275,25 @@ for (const scenario of ['approve', 'cancel', 'lock', 'edit']) {
   assert(!f.calls.some(c => /onchain\/(send|drain)|wallet\/send/.test(c.path)));
 }
 console.log('PASS: exact message review, cancellation, no payment, verification, edit/lock invalidation');
+
+for (const mode of ['approve', 'cancel', 'error', 'malformed', 'lock', 'edit']) {
+  const f = fixture('bitcoin');
+  f.element('token').value = 'test-token'; await f.trigger('unlock', 'submit');
+  f.element('ln-destination').value = 'lno-test-offer'; f.element('ln-amount').value = '50000';
+  let review = '';
+  f.context.confirm = text => { review = text; return mode !== 'cancel'; };
+  const fetch = f.context.fetch;
+  f.context.fetch = async (path, options) => {
+    if (path.includes('/fees/lightning/pay?')) {
+      if (mode === 'error') throw Error('No constructible Lightning inputs');
+      if (mode === 'malformed') return {ok: true, status: 200, json: async () => ({})};
+      if (mode === 'lock') await f.trigger('lock');
+      if (mode === 'edit') f.element('ln-amount').value = '60000';
+    }
+    return fetch(path, options);
+  };
+  await f.trigger('ln-pay', 'onsubmit');
+  assert.equal(f.calls.filter(c => c.path.endsWith('/lightning/pay')).length, mode === 'approve' ? 1 : 0);
+  if (mode === 'approve' || mode === 'cancel') assert.match(review, /Estimated total: 56,000 sats/);
+}
+console.log('PASS: Lightning cost review, cancellation, failed/malformed quotes, edit and lock safety');

@@ -5,7 +5,7 @@ contributors. This edition presets new wallets to **https://ark.paperclippool.xy
 Existing wallet configuration is preserved. Wallet keys stay on your device.
 
 **Public beta. Paperclip Ark is open for XBT deposits, Ark transfers, and Lightning payments.**
-The current release is **0.8.0 beta**. Check [service status](https://ark.paperclippool.xyz/) before funding.
+The current release is **0.8.1 beta**. Check [service status](https://ark.paperclippool.xyz/) before funding.
 
 Current beta limits: boarding starts at **20,000 sats**; Lightning payments are
 limited to **250,000 sats**. Fees and recovery reserves apply. Very small Lightning
@@ -16,6 +16,14 @@ payments can be below the funded-HTLC minimum. The server can change these limit
 **Not independently audited.** Paperclip Wallet and its Ark integration are
 experimental and provided without warranty. Functional tests are not a security
 audit. Bugs can cause loss of funds. Use only amounts you can afford to lose.
+
+## What changed in 0.8.1
+
+- Lightning sends try builder-validated input combinations, preferring a usable single VTXO. Fragmented funds no longer force an invalid HTLC or change output when a suitable input is available.
+- Lightning fee estimates use the same selection and include recovery reserves. An unbuildable payment returns an error instead of a hypothetical estimate.
+- The web wallet shows the estimated total before confirming a Lightning payment with an entered amount. Estimates can change as wallet funds or server fees change. No automatic payment retries or automatic consolidation are added.
+
+No ASP protocol or wallet database change is required. Recovery minimums remain enforced.
 
 ## What changed in 0.8.0
 
@@ -84,8 +92,8 @@ The [StartOS 0.4 wrapper](https://github.com/connorslab/paperclip-wallet-startos
 
 Current releases:
 
-- [Umbrel community store](https://github.com/connorslab/paperclip-umbrel-app-store): wallet 0.8.0, with a pinned image.
-- [StartOS 0.4 installers](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.8.0-beta.1): x86-64 and ARM64 beta packages.
+- [Umbrel community store](https://github.com/connorslab/paperclip-umbrel-app-store): wallet 0.8.1, with a pinned image.
+- [StartOS 0.4 installers](https://github.com/connorslab/paperclip-wallet-startos/releases/tag/v0.8.1-beta.1): x86-64 and ARM64 beta packages.
 
 See [platform instructions](deployment/PLATFORMS.md) for authentication,
 backend setup, packaging, and restore requirements.

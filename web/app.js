@@ -16,7 +16,7 @@ async function api(path, body, method) {
     let message = '';
     try { const detail = await response.json(); message = typeof detail.message === 'string' ? detail.message.slice(0, 900) : ''; } catch {}
     if (message.includes('no pending lightning receive')) message = 'No received payment matches this invoice in this wallet. An invoice from another wallet belongs in Pay someone, not Received status.';
-    if (message.includes('dust') || message.includes('funded-HTLC minimum')) message = path === 'fees/ark/send' ? 'Ark payment or change is too small after recovery reserves. Check your balance and amount, or refresh eligible inputs. No payment was sent.' : 'Payment cannot be constructed: the HTLC or remaining change is too small after recovery reserves. Check your Ark balance and try a larger payment or refresh eligible inputs.';
+    if (message.toLowerCase().includes('dust') || message.includes('funded-HTLC minimum') || message.includes('No constructible Lightning input')) message = path === 'fees/ark/send' ? 'Ark payment or change is too small after recovery reserves. Check your balance and amount, or refresh eligible inputs. No payment was sent.' : 'Available Ark inputs cannot cover this payment with valid recovery reserves and change. Refresh eligible inputs to consolidate funds, or add Ark funds. Check Sent status before retrying.';
     throw new Error(message || 'Wallet request failed (' + response.status + '). Check wallet access and local services.');
   }
   return response.status === 204 ? null : response.json();
@@ -176,8 +176,16 @@ $('chain-send').onsubmit = event => { event.preventDefault(); run(event.submitte
 $('ln-pay').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
   if (!lightningEnabled) throw new Error('Lightning is not enabled in this wallet recovery profile.');
   const destination = $('ln-destination').value.trim(), amount = sats('ln-amount', true);
+  const paymentSession = token;
   if (!destination) throw new Error('Enter an XBT Lightning request.');
-  if (!confirm('Pay ' + (amount === null ? 'the invoice amount' : amount.toLocaleString() + ' sats') + ' from Ark on ' + network + '?\n' + destination + '\n\nService fees plus 4,000\u20136,000 sats of recovery reserves per input apply. Failed payments may also consume refund reserves.')) return;
+  let costs = 'Service fees plus 4,000\u20136,000 sats of recovery reserves per input apply.';
+  if (amount !== null) {
+    const quote = await api('fees/lightning/pay?amount_sat=' + amount);
+    if (![quote.gross_amount_sat, quote.fee_sat, quote.net_amount_sat].every(Number.isSafeInteger) || quote.net_amount_sat !== amount || quote.fee_sat < 0 || quote.gross_amount_sat !== amount + quote.fee_sat) throw new Error('Invalid Lightning estimate. No payment was sent.');
+    costs = 'Estimated total: ' + quote.gross_amount_sat.toLocaleString() + ' sats\nIncludes ' + quote.fee_sat.toLocaleString() + ' sats in service fees and recovery reserves.\nEstimate may change if wallet funds or server fees change.';
+  }
+  if (!token || token !== paymentSession || $('wallet').hidden || destination !== $('ln-destination').value.trim() || amount !== sats('ln-amount', true)) throw new Error('Payment details changed. Review them again. No payment was sent.');
+  if (!confirm('Pay ' + (amount === null ? 'the invoice amount' : amount.toLocaleString() + ' sats') + ' from Ark on ' + network + '?\n' + destination + '\n\n' + costs + '\nFailed payments may also consume refund reserves.')) return;
   const result = await mutate('lightning/pay', {destination, amount_sat: amount, comment: null});
   $('ln-result').textContent = JSON.stringify(result, null, 2);
   paymentSummary('Submitted', 'Payment submitted once. Check Sent status before trying again.');
