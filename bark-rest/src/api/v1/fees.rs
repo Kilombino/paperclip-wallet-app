@@ -19,6 +19,7 @@ use crate::error::{self, HandlerResult, ContextExt, badarg};
 		board_fee,
 		send_onchain_fee,
 		offboard_all_fee,
+		refresh_all_fee,
 		offboard_fee,
 		lightning_send_fee,
 		lightning_receive_fee,
@@ -44,6 +45,7 @@ pub fn router() -> Router<Arc<ServerState>> {
 		.route("/board", get(board_fee))
 		.route("/send-onchain", get(send_onchain_fee))
 		.route("/offboard-all", get(offboard_all_fee))
+		.route("/refresh-all", get(refresh_all_fee))
 		.route("/offboard", post(offboard_fee))
 		.route("/lightning/pay", get(lightning_send_fee))
 		.route("/lightning/receive", get(lightning_receive_fee))
@@ -180,6 +182,36 @@ pub async fn offboard_all_fee(
 
 	let estimate = wallet.estimate_offboard_all(&address).await
 		.context("Failed to estimate offboard-all fee")?;
+
+	Ok(axum::Json(estimate.into()))
+}
+
+#[utoipa::path(
+	get,
+	path = "/refresh-all",
+	summary = "Estimate refresh-all fee",
+	responses(
+		(status = 200, description = "Returns the fee estimate", body = bark_json::web::FeeEstimateResponse),
+		(status = 500, description = "Internal server error", body = error::InternalServerError)
+	),
+	description = "Estimates the round fee for refreshing every spendable VTXO, as \
+		`wallet/refresh/all` would. The gross amount is the total refreshed, the net amount \
+		what the new VTXOs hold. Lets a wallet show the cost before the user confirms.",
+	tag = "fees"
+)]
+#[debug_handler]
+pub async fn refresh_all_fee(
+	State(state): State<Arc<ServerState>>,
+) -> HandlerResult<Json<bark_json::web::FeeEstimateResponse>> {
+	let wallet = state.require_wallet()?;
+
+	let vtxos = wallet.spendable_vtxos().await
+		.context("Failed to get spendable VTXOs")?;
+	if vtxos.is_empty() {
+		badarg!("No VTXOs to refresh");
+	}
+	let estimate = wallet.estimate_refresh_fee(&vtxos).await
+		.context("Failed to estimate refresh fee")?;
 
 	Ok(axum::Json(estimate.into()))
 }
