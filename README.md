@@ -8,7 +8,7 @@ Existing wallet configuration is preserved. Wallet keys stay on your device.
 Use wallet **0.7.4 or later**. Check [service status](https://ark.paperclippool.xyz/) before funding.
 
 Current beta limits: boarding starts at **20,000 sats**; Lightning payments are
-limited to **50,000 sats**. Fees and recovery reserves apply. Very small Lightning
+limited to **250,000 sats**. Fees and recovery reserves apply. Very small Lightning
 payments can be below the funded-HTLC minimum. The server can change these limits.
 
 ## Features

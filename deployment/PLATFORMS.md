@@ -52,7 +52,7 @@ does not overwrite an existing wallet or import a seed as a substitute for
 a full recovery backup. Live platform backup consistency still needs testing.
 
 Lightning controls activate only when the connected server advertises funded Lightning. The production Paperclip server enables funded Lightning in beta, with a
-50,000-sat payment limit. Fees, reserves, and funded-HTLC minimums apply.
+250,000-sat payment limit. Fees, reserves, and funded-HTLC minimums apply.
 The wallet uses the ASP's Lightning service; users do not need their own CLN.
 Paul Lamb's Lightning Fork is LND-based and needs a separate ASP adapter.
 
