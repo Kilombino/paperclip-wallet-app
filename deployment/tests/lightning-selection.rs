@@ -7,7 +7,11 @@ async fn xbt_lightning_constructible_selection() {
 	ctx.generate_blocks(200).await;
 	let ln = ctx.new_lightning_setup("ln").await;
 	let srv = ctx.captaind("asp").lightningd(&ln.internal).funded(btc(2))
-		.cfg(|c| { c.experimental_funded_lightning = true; }).create().await;
+		.cfg(|c| {
+			c.experimental_funded_lightning = true;
+			// Reproduce a small received/change VTXO using a direct regtest board.
+			c.min_board_amount = sat(10_000);
+		}).create().await;
 	for bolt12 in [false, true] {
 		let name = if bolt12 { "bolt12" } else { "bolt11" };
 		let wallet = ctx.bark(name, &srv).funded(sat(500_000)).create().await;
