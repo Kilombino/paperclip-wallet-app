@@ -149,6 +149,20 @@ impl DaemonProcess {
 		}
 	}
 
+	async fn run_offer_process(&self) {
+		loop {
+			let result = tokio::select! {
+				_ = self.shutdown.cancelled() => return,
+				r = Wallet::serve_offer_weak(self.wallet.clone(), self.shutdown.clone()) => r,
+			};
+			if let Err(error) = result { warn!("BOLT12 offer relay: {error:#}"); }
+			tokio::select! {
+				_ = self.shutdown.cancelled() => return,
+				_ = bark_runtime::sleep(Duration::from_secs(5)) => {},
+			}
+		}
+	}
+
 	async fn handle_round_event(&self, wallet: &Wallet, event: &RoundEvent) -> anyhow::Result<()> {
 		// Do a refresh if you need to
 		match &event {
@@ -308,6 +322,10 @@ impl DaemonProcess {
 						warn!("An error occured while syncing pending board: {e:#}");
 					}
 
+					if let Err(e) = wallet.sync_pending_lightning_receives().await {
+						warn!("Error syncing Lightning receives: {e:#}");
+					}
+
 					if let Err(e) = wallet.sync_pending_offboards().await {
 						warn!("An error occured while syncing pending offboards: {e:#}");
 					}
@@ -427,6 +445,7 @@ impl DaemonProcess {
 				let p3 = Arc::clone(&proc);
 				let p4 = Arc::clone(&proc);
 				let p5 = Arc::clone(&proc);
+				let p6 = Arc::clone(&proc);
 				let _ = futures::join!(
 					supervised("server-connection", move || {
 						let p = Arc::clone(&p1);
@@ -444,6 +463,10 @@ impl DaemonProcess {
 						let p = Arc::clone(&p4);
 						async move { p.run_exit_progress_process().await }
 					}),
+					supervised("offers", move || {
+						let p = Arc::clone(&p6);
+						async move { p.run_offer_process().await }
+					}),
 					supervised("mailbox", move || {
 						let p = Arc::clone(&p5);
 						async move { p.run_mailbox_messages_process().await }
@@ -458,6 +481,7 @@ impl DaemonProcess {
 					self.run_sync_processes(),
 					self.run_exit_progress_process(),
 					self.run_mailbox_messages_process(),
+					self.run_offer_process(),
 				);
 			}
 		}

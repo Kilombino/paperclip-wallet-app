@@ -7,7 +7,7 @@ Every payment must use a fresh wallet-owned preimage and settle through the Ark
 HTLC claim process. The server must not collect a normal CLN offer payment and
 credit a custodial balance in its place.
 
-## Implemented groundwork
+## Implemented on the development branch
 
 - Receive checkpoints and permanent settlement records accept BOLT11 and BOLT12
   invoices. Existing invoice strings and BOLT11 checkpoint JSON remain readable.
@@ -17,10 +17,25 @@ credit a custodial balance in its place.
 - Wallet receive cards generate QR codes locally. Copy, native sharing where
   available, SVG download, mobile layout and reduced motion are supported.
 
-No endpoint currently creates a reusable receive offer. Do not advertise this
-branch as complete BOLT12 receive support, tag a release, or update package pins.
+The candidate adds `/api/v1/lightning/offers` (GET, POST, DELETE), a wallet-owned
+signing key, a persistent reusable offer, authenticated live request sessions,
+and per-request hold registration. Reusable receiving requires the new server
+capability; existing wallets can continue using the ASP's unchanged BOLT11 APIs.
+`experimental_bolt12_receive` defaults to false. Public releases remain disabled
+until the end-to-end checks below pass.
 
-## Work required before release
+The wallet daemon must be online to answer new invoice requests. Closing the
+browser does not stop it. Manual-sync mode cannot create offers. Disabling an
+offer stops new requests but preserves issued invoices and their claim records.
+A replay of the same signed request uses the same stored invoice; a distinct
+request derives a distinct preimage. The ASP never receives the signing key or
+the preimage before the ordinary recoverable Ark HTLC claim.
+
+The offer checkpoint is a new persisted record type. Keep a complete wallet
+backup and do not downgrade an active candidate wallet to an older binary that
+cannot read this checkpoint.
+
+## Release verification checklist
 
 1. Persist authenticated offer registration, revocation and per-payment request
    bindings. Bound requests and stored records to prevent resource exhaustion.
@@ -29,8 +44,6 @@ branch as complete BOLT12 receive support, tag a release, or update package pins
    expiry before allocating a payment hash. Preserve unrelated CLN offer traffic.
 3. Persist wallet-owned secrets before making invoices payable. Allocate a fresh
    secret per payment; never reuse a settled, expired or canceled payment hash.
-   If pre-provisioned hashes are used for offline invoice issuance, consumption
-   must be atomic and durable, with bounded refill and safe exhaustion behavior.
 4. Build and sign matching BOLT12 invoices and register hold state plus the Ark
    subscription before returning an invoice. The wallet must verify that each
    invoice matches its hash, offer, amount, XBT identity and required CLTV window.
@@ -53,5 +66,18 @@ The QR test supports an independent jsQR decoder supplied as its CLI argument.
 Browser tests cover actual rendered scan round trips, mobile overflow, reduced
 motion and clearing QR images on lock. Rust tests cover legacy checkpoint JSON,
 BOLT12 checkpoint/settlement persistence, payment hash validation and exact
-server invoice matching. These checks are not end-to-end BOLT12 receive tests
-and are not an independent security audit.
+server invoice matching.
+
+Isolated XBT regtest now passes real CLN-to-Ark payments to one reusable offer,
+concurrent requests with distinct payment hashes, wallet and ASP restart with an
+issued invoice, and disabling an offer without discarding issued invoices.
+The exact published 0.7.7 wallet image was also tested against the candidate ASP:
+on-chain boarding and BOLT11 receiving work without upgrading the wallet.
+Its image index digest is
+`sha256:93eb4684ed19d6af16c1257854a5d169d9e1aeb766257697ff4b057f7118de97`.
+
+Interoperability testing found and corrected an LDK-specific receive-path
+authentication mismatch: the CLN relay path now uses standard BOLT4 empty-AAD
+encryption. A recipient-side decryption/tampering test protects this behavior.
+These checks are not an independent security audit. Failure/recovery coverage and
+platform release acceptance remain gates before coordinated public rollout.

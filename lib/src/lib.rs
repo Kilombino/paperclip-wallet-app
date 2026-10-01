@@ -10,6 +10,7 @@ pub mod address;
 pub mod arkoor;
 pub mod attestations;
 pub mod board;
+pub mod bolt12_receive;
 pub mod connectors;
 pub mod encode;
 pub mod error;

@@ -26,6 +26,7 @@ body{background:radial-gradient(ellipse at 85% 0%,#f568350a,transparent 48%),#11
 
 .receive-raw{margin:.75rem 0}.receive-raw output{max-height:9rem;overflow:auto;font-size:.8rem}
 
+.offer-panel{margin:1.5rem 0;padding:1.4rem;border:1px solid #ff6b3538;border-radius:18px;background:linear-gradient(135deg,#1b2b40,#172235);animation:receive-enter .2s ease-out}.offer-heading{display:flex;justify-content:space-between;align-items:start;gap:1rem}.offer-panel .actions{display:flex;flex-wrap:wrap;gap:.6rem}.offer-panel .actions button{margin:0}.offer-panel h3{margin-top:.5rem}@media(max-width:600px){.offer-heading{display:block}.offer-panel{padding:1rem}}@media(prefers-reduced-motion:reduce){.offer-panel{animation:none}}
 /* Message proofs stay separate from payments and keep exact whitespace visible. */
 .message-card textarea{width:100%;box-sizing:border-box;resize:vertical;white-space:pre-wrap;font:inherit;padding:12px;border:1px solid var(--border,#344459);border-radius:12px;background:#101c2c;color:#edf3fc}
 .message-card output{white-space:pre-wrap;overflow-wrap:anywhere}

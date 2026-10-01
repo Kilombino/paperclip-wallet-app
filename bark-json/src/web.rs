@@ -16,7 +16,6 @@ use utoipa::ToSchema;
 
 use crate::cli::RoundStatus;
 
-
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
 pub struct OnchainMessageRequest {
@@ -902,4 +901,12 @@ pub struct WalletDeleteResponse {
 	pub deleted: bool,
 	pub fingerprint: Option<String>,
 	pub message: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+pub struct LightningOfferRequest {
+	pub description: String,
+	/// Leave empty to let each payer choose the amount.
+	pub amount_sat: Option<u64>,
 }

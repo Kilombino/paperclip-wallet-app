@@ -430,10 +430,20 @@ pub(crate) async fn check_incoming_lightning_payment(
 	recv: &LightningReceive,
 ) -> Result<IncomingStatus, AdvanceError> {
 	let (mut srv, _) = wallet.require_server().await?;
-	let sub = srv.client.check_lightning_receive(protos::CheckLightningReceiveRequest {
-		hash: recv.payment_hash.to_byte_array().to_vec(),
-		wait: false,
-	}).await.map_err(AdvanceError::Server)?.into_inner();
+	let query = protos::CheckLightningReceiveRequest { hash: recv.payment_hash.to_vec(), wait: false };
+	let response = srv.client.check_lightning_receive(query.clone()).await;
+	let response = match response {
+		Err(error) if error.code() == tonic::Code::NotFound && matches!(recv.invoice, Invoice::Bolt12(_)) => {
+			if invoice_expired(&recv.invoice) { return Ok(IncomingStatus::Canceled); }
+			let mailbox = ark::mailbox::MailboxIdentifier::from_pubkey(wallet.inner.seed.to_mailbox_keypair().public_key());
+			srv.client.register_bolt12_receive(protos::RegisterBolt12ReceiveRequest {
+				invoice: recv.invoice.to_string(), min_cltv_delta: recv.htlc_recv_cltv_delta.into(), mailbox_id: Some(mailbox.serialize()),
+			}).await.map_err(AdvanceError::Server)?;
+			srv.client.check_lightning_receive(query).await
+		},
+		other => other,
+	};
+	let sub = response.map_err(AdvanceError::Server)?.into_inner();
 
 	let status = protos::LightningReceiveStatus::try_from(sub.status)
 		.with_context(|| format!("unknown payment status: {}", sub.status))?;

@@ -25,6 +25,7 @@ function fixture(network, lightningEnabled = true, empty = false) {
         : path.endsWith('/onchain/balance') ? {confirmed_sat: 50000}
         : path.endsWith('/addresses/next') ? {address: 'bc1-test-address'}
         : path.endsWith('/lightning/pay') ? {payment_hash: 'test-hash', message: 'initiated'}
+        : path.endsWith('/lightning/offers') ? (options.method === 'DELETE' ? {active:false} : {offer:'lno1-test-offer',active:true})
         : path.endsWith('/receives/invoice') ? {invoice: 'ln-test-invoice'}
         : path.endsWith('/onchain/message/sign') ? {...JSON.parse(options.body),scheme:'bip322-simple',signature:'smp-test-proof'}
         : path.endsWith('/onchain/message/verify') ? {valid:true}
@@ -219,6 +220,25 @@ for (const change of ['destination', 'lock']) {
   assert(!f.calls.some(c => c.path.endsWith('/wallet/send')), 'Stale estimate must not send');
 }
 console.log('PASS: edited destination and locked wallet invalidate an in-flight estimate');
+
+{
+  const f = fixture('bitcoin');
+  f.element('token').value = 'local-test-token';
+  await f.trigger('unlock', 'submit');
+  f.element('offer-description').value = 'My reusable offer';
+  f.element('offer-amount').value = '';
+  await f.trigger('ln-offer', 'onsubmit');
+  const created = f.calls.find(c => c.path.endsWith('/lightning/offers') && c.options.method === 'POST');
+  assert.deepEqual(JSON.parse(created.options.body), {description:'My reusable offer',amount_sat:null});
+  assert.equal(f.element('ln-offer-output').textContent,'lno1-test-offer');
+  await f.trigger('offer-disable');
+  assert(f.calls.some(c => c.path.endsWith('/lightning/offers') && c.options.method === 'DELETE'));
+  assert.equal(f.element('offer-disable').hidden,true);
+  await f.trigger('offer-load');
+  await f.trigger('lock');
+  assert.equal(f.element('ln-offer-output').textContent,'');
+}
+console.log('PASS: reusable offer creation, saved offer, authenticated disable, and lock cleanup');
 
 for (const scenario of ['approve', 'cancel', 'lock', 'edit']) {
   const f = fixture('bitcoin');

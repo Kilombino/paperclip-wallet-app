@@ -6,9 +6,9 @@ let lightningEnabled = false;
 let setupPending = false;
 const $ = id => document.getElementById(id);
 const status = text => { $('status').textContent = text; };
-async function api(path, body) {
+async function api(path, body, method) {
   const response = await fetch('/api/v1/' + path, {
-    method: body === undefined ? 'GET' : 'POST', cache: 'no-store', redirect: 'error',
+    method: method || (body === undefined ? 'GET' : 'POST'), cache: 'no-store', redirect: 'error',
     headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
     ...(body === undefined ? {} : {body: JSON.stringify(body)})
   });
@@ -221,8 +221,8 @@ $('lock').onclick = () => {
   lockSession();
   $('ark-estimate').hidden = true; $('ark-estimate-values').textContent = '';
   lightningEnabled = false; $('ln-controls').disabled = true;
-  for (const id of ['ln-invoice', 'ln-result', 'chain-result', 'history', 'ark-balance', 'chain-balance']) $(id).textContent = '';
-  for (const id of ['ln-destination', 'ln-amount', 'ln-receive-amount', 'ln-description', 'ln-identifier', 'chain-destination', 'chain-amount']) $(id).value = '';
+  for (const id of ['ln-offer-output', 'ln-invoice', 'ln-result', 'chain-result', 'history', 'ark-balance', 'chain-balance']) $(id).textContent = '';
+  for (const id of ['offer-description', 'offer-amount', 'ln-destination', 'ln-amount', 'ln-receive-amount', 'ln-description', 'ln-identifier', 'chain-destination', 'chain-amount']) $(id).value = '';
 };
 $('deposit').onclick = event => run(event.target, async () => {
   const receiveSession = token;
@@ -359,6 +359,13 @@ $('vtxo-update').onclick = event => run(event.target,async()=>{await update();st
 const vtxoLock = $('lock').onclick;
 $('lock').onclick = () => { vtxoLock();vtxoRenderKey='';vtxoSnapshot={balance:{},rows:[],tip:null};$('vtxo-list').replaceChildren();$('vtxo-summary').replaceChildren();$('vtxo-tip').textContent=''; };
 
+function showOffer(offer) {
+  $('offer-state').textContent = offer?.active ? 'Enabled while wallet service is online' : 'Disabled';
+  $('offer-disable').hidden = !offer?.active;
+  $('ln-offer-output').textContent = offer?.offer || 'No reusable offer yet.';
+  if (offer?.active) PaperclipReceive.show('ln-offer-output', offer.offer, 'Reusable XBT Lightning offer');
+}
+
 let messageProof = null;
 function clearMessageProof() {
   messageProof = null; $('message-proof').hidden = true;
@@ -398,3 +405,22 @@ $('lock').onclick = () => {
   messageLock(); clearMessageProof();
   $('message-address').value = ''; $('message-text').value = ''; $('message-verify-signature').value = '';
 };
+$('ln-offer').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
+  if (!lightningEnabled) throw new Error('Lightning is not enabled in this wallet recovery profile.');
+  const session = token;
+  const offer = await mutate('lightning/offers', {description: $('offer-description').value.trim(), amount_sat: sats('offer-amount', true)});
+  if (!token || token !== session || $('wallet').hidden) return;
+  showOffer(offer); status('Reusable offer saved. Keep the wallet service online to receive.');
+}); };
+$('offer-load').onclick = event => run(event.target, async () => {
+  const session = token, offer = await api('lightning/offers');
+  if (!token || token !== session || $('wallet').hidden) return;
+  showOffer(offer);
+});
+$('offer-disable').onclick = event => run(event.target, async () => {
+  if (!confirm('Disable this offer for new requests? Payments already in progress will remain tracked.')) return;
+  const session = token;
+  await api('lightning/offers', undefined, 'DELETE');
+  if (!token || token !== session || $('wallet').hidden) return;
+  PaperclipReceive.clear(); showOffer(null); status('Offer disabled. Existing payments remain tracked.');
+});

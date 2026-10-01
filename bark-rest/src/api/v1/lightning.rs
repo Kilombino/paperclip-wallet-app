@@ -8,8 +8,7 @@ use bitcoin::Amount;
 use anyhow::Context;
 use utoipa::OpenApi;
 
-use ark::lightning::Offer;
-use bark::lightning_invoice::Bolt11Invoice;
+use ark::lightning::{Invoice, Offer};
 use bark::lnurllib::lightning_address::LightningAddress;
 use bark::lnurllib::lnurl::LnUrl;
 
@@ -19,6 +18,9 @@ use crate::ServerState;
 #[derive(OpenApi)]
 #[openapi(
 	paths(
+		create_offer,
+		get_offer,
+		disable_offer,
 		generate_invoice,
 		generate_invoice_for_address,
 		get_receive_status,
@@ -28,6 +30,7 @@ use crate::ServerState;
 		get_send_status,
 	),
 	components(schemas(
+		bark_json::web::LightningOfferRequest,
 		bark_json::web::LightningInvoiceRequest,
 		bark_json::web::LightningInvoiceForAddressRequest,
 		bark_json::cli::InvoiceInfo,
@@ -42,6 +45,7 @@ pub struct LightningApiDoc;
 
 pub fn router() -> Router<Arc<ServerState>> {
 	Router::new()
+		.route("/offers", get(get_offer).post(create_offer).delete(disable_offer))
 		.route("/receives/invoice", post(generate_invoice))
 		.route("/receives/invoice/for-address", post(generate_invoice_for_address))
 		.route("/receives/{identifier}", get(get_receive_status).delete(cancel_receive))
@@ -273,10 +277,10 @@ pub async fn cancel_receive(
 		(status = 200, description = "Returns success message, optionally with \
 			preimage if payment was immediately settled", body = bark_json::web::LightningPayResponse),
 		(status = 400, description = "The provided destination is not a valid \
-			BOLT11 invoice, BOLT12 offer, or Lightning address", body = error::BadRequestError),
+			BOLT11 or BOLT12 invoice, BOLT12 offer, or Lightning address", body = error::BadRequestError),
 		(status = 500, description = "Internal server error", body = error::InternalServerError)
 	),
-	description = "Sends a payment to a Lightning destination. Accepts a BOLT11 invoice, \
+	description = "Sends a payment to a Lightning destination. Accepts a BOLT11 or BOLT12 invoice, \
 		BOLT12 offer, or Lightning address. The `amount_sat` field is required for Lightning \
 		addresses but optional for invoices and offers. Comments are only supported for \
 		Lightning addresses.",
@@ -291,9 +295,9 @@ pub async fn pay(
 
 	let amount = body.amount_sat.map(|a| Amount::from_sat(a));
 
-	let invoice = if let Ok(invoice) = Bolt11Invoice::from_str(&body.destination) {
+	let invoice = if let Ok(invoice) = Invoice::from_str(&body.destination) {
 		if body.comment.is_some() {
-			badarg!("comment is not supported for BOLT-11 invoices");
+			badarg!("comment is not supported for Lightning invoices");
 		}
 		wallet.pay_lightning_invoice(invoice, amount, false).await?
 	} else if let Ok(offer) = Offer::from_str(&body.destination) {
@@ -308,11 +312,35 @@ pub async fn pay(
 		let amount = amount.badarg("amount is required for LNURL")?;
 		wallet.pay_lnurl(&lnurl, amount, body.comment, false).await?
 	} else {
-		badarg!("argument is not a valid BOLT-11 invoice, BOLT-12 offer, Lightning address or LNURL");
+		badarg!("argument is not a valid BOLT-11 or BOLT-12 invoice, BOLT-12 offer, Lightning address or LNURL");
 	};
 
 	Ok(axum::Json(bark_json::web::LightningPayResponse {
 		message: "Payment initiated successfully".to_string(),
 		payment_hash: Some(invoice.payment_hash()),
 	}))
+}
+
+#[utoipa::path(post, path = "/offers", request_body = bark_json::web::LightningOfferRequest,
+ responses((status = 200, description = "Reusable wallet-owned offer")), tag = "lightning")]
+#[debug_handler]
+pub async fn create_offer(State(state): State<Arc<ServerState>>, Json(body): Json<bark_json::web::LightningOfferRequest>) -> HandlerResult<Json<serde_json::Value>> {
+	let wallet = state.require_wallet()?;
+	let offer = wallet.create_lightning_offer(body.description, body.amount_sat).await.context("Failed to create reusable offer")?;
+	Ok(Json(serde_json::json!({"offer": offer.offer, "active": offer.active, "description": offer.description, "amount_sat": offer.amount_sat})))
+}
+
+#[utoipa::path(get, path = "/offers", responses((status = 200, description = "Current reusable offer or null")), tag = "lightning")]
+#[debug_handler]
+pub async fn get_offer(State(state): State<Arc<ServerState>>) -> HandlerResult<Json<serde_json::Value>> {
+	let wallet = state.require_wallet()?;
+	let offer = wallet.lightning_offer().await?;
+	Ok(Json(offer.map(|offer| serde_json::json!({"offer": offer.offer, "active": offer.active, "description": offer.description, "amount_sat": offer.amount_sat})).unwrap_or(serde_json::Value::Null)))
+}
+
+#[utoipa::path(delete, path = "/offers", responses((status = 200, description = "Offer disabled; issued invoices remain tracked")), tag = "lightning")]
+#[debug_handler]
+pub async fn disable_offer(State(state): State<Arc<ServerState>>) -> HandlerResult<Json<serde_json::Value>> {
+	state.require_wallet()?.disable_lightning_offer().await?;
+	Ok(Json(serde_json::json!({"active": false})))
 }
