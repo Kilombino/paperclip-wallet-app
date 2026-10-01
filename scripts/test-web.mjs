@@ -14,7 +14,7 @@ function fixture(network, lightningEnabled = true, empty = false) {
     return elements.get(id);
   };
   let failPath = null;
-  const context = vm.createContext({document: {getElementById: element, createElement: () => ({textContent:'',append() {}})}, confirm: () => true, URL, btoa, setInterval: () => {}, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+  const context = vm.createContext({PaperclipReceive: {show() {}, clear() {}}, document: {getElementById: element, createElement: () => ({textContent:'',append() {}})}, confirm: () => true, URL, btoa, setInterval: () => {}, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     fetch: async (path, options) => {
       calls.push({path, options});
       if (failPath && path.endsWith(failPath)) throw Error('Transport interrupted');

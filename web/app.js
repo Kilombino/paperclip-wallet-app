@@ -106,7 +106,7 @@ $('setup-lock').onclick = () => {
 };
 $('lock').onclick = () => { token = ''; network = null; $('network').textContent = 'NETWORK UNVERIFIED'; $('deposit-address').textContent = ''; $('exits').textContent = '';  $('wallet').hidden = true; $('login').hidden = false; $('vtxos').textContent = ''; $('address').textContent = ''; $('destination').value = ''; status('Wallet locked.'); };
 $('reload').onclick = event => run(event.target, async () => { await update(); status('Balances updated.'); });
-$('receive').onclick = event => run(event.target, async () => { const result = await api('wallet/addresses/next', {}); $('address').textContent = result.address; status('New Ark receive address.'); });
+$('receive').onclick = event => run(event.target, async () => { const receiveSession = token; const result = await api('wallet/addresses/next', {}); if (!token || token !== receiveSession || $('wallet').hidden) return; $('address').textContent = result.address; PaperclipReceive.show('address', result.address, 'Receive on Ark'); status('New Ark receive address.'); });
 $('send').addEventListener('submit', event => { event.preventDefault(); run(event.submitter, async () => {
   const destination = $('destination').value.trim(), amount = Number($('amount').value);
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('Enter a positive whole number of sats.');
@@ -187,11 +187,14 @@ $('ln-pay').onsubmit = event => { event.preventDefault(); run(event.submitter, a
 }); };
 $('ln-receive').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
   if (!lightningEnabled) throw new Error('Lightning is not enabled in this wallet recovery profile.');
+  const receiveSession = token;
   const amount = sats('ln-receive-amount');
   const result = await mutate('lightning/receives/invoice', {
     amount_sat: amount, description: $('ln-description').value.trim() || null, token: null
   });
-  $('ln-invoice').textContent = result.invoice; $('ln-copy').hidden = false;
+  if (!token || token !== receiveSession || $('wallet').hidden) return;
+  $('ln-invoice').textContent = result.invoice; $('ln-copy').hidden = true;
+  PaperclipReceive.show('ln-invoice', result.invoice, 'Receive Lightning into Ark');
   paymentSummary('Awaiting payment', 'Share this invoice. Keep the wallet online until settlement completes.');
   $('ln-identifier').value = result.invoice; $('ln-direction').value = 'receives';
   status('Invoice created. A payment is not settled until the wallet reports completion.');
@@ -222,8 +225,11 @@ $('lock').onclick = () => {
   for (const id of ['ln-destination', 'ln-amount', 'ln-receive-amount', 'ln-description', 'ln-identifier', 'chain-destination', 'chain-amount']) $(id).value = '';
 };
 $('deposit').onclick = event => run(event.target, async () => {
+  const receiveSession = token;
   const result = await api('onchain/addresses/next', {});
+  if (!token || token !== receiveSession || $('wallet').hidden) return;
   $('deposit-address').textContent = result.address;
+  PaperclipReceive.show('deposit-address', result.address, 'Receive on-chain XBT');
   status('Deposit address for ' + (network === 'bitcoin' ? 'XBT mainnet' : 'regtest') + '.');
 });
 $('board').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
@@ -276,7 +282,7 @@ function renderActivity(records) {
   }
 }
 const reviewLock = $('lock').onclick;
-$('lock').onclick = () => { reviewLock(); $('activity-list').replaceChildren(); $('activity-summary').textContent = ''; $('payment-summary').textContent = ''; $('payment-summary').hidden = true; $('ln-copy').hidden = true; };
+$('lock').onclick = () => { reviewLock(); PaperclipReceive.clear(); $('activity-list').replaceChildren(); $('activity-summary').textContent = ''; $('payment-summary').textContent = ''; $('payment-summary').hidden = true; $('ln-copy').hidden = true; };
 
 // A session belongs to one browser tab. Never save keys or RPC credentials here.
 function sessionRead(key) { try { return sessionStorage.getItem(key); } catch { return null; } }
