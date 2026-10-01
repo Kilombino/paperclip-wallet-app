@@ -10,7 +10,7 @@ function fixture(network, lightningEnabled = true, empty = false) {
   const element = id => {
     assert(ids.has(id), 'UI element must exist in the HTML: ' + id);
     if (!elements.has(id)) elements.set(id, {value: '', textContent: '', hidden: false,
-      addEventListener(type, fn) { this[type] = fn; }});
+      replaceChildren() {}, append() {}, addEventListener(type, fn) { this[type] = fn; }});
     return elements.get(id);
   };
   let failPath = null;
@@ -35,7 +35,7 @@ function fixture(network, lightningEnabled = true, empty = false) {
     // Submit listeners intentionally return before run() completes.
     await new Promise(resolve => setImmediate(resolve));
   }
-  return {element, calls, trigger, fail: (path = '/wallet/send') => { failPath = path; }};
+  return {context, element, calls, trigger, fail: (path = '/wallet/send') => { failPath = path; }};
 }
 for (const network of ['bitcoin', 'regtest']) {
   const f = fixture(network);
@@ -148,3 +148,15 @@ for (const interrupted of [false, true]) {
   }
 }
 console.log('PASS: authenticated first-run setup, platform password, explicit backend, and no ambiguous creation retry');
+
+{
+  const f = fixture('bitcoin');
+  vm.runInContext("paymentSummary('unknown', 'No payment recorded'); renderActivity([])", f.context);
+  assert.match(f.element('payment-summary').textContent, /unknown/);
+  assert.match(f.element('activity-list').textContent, /No Ark activity/);
+  f.element('token').value = 'test-token'; await f.trigger('unlock', 'submit');
+  await f.trigger('lock');
+  assert.equal(f.element('payment-summary').hidden, true);
+  assert.equal(f.element('activity-summary').textContent, '');
+}
+console.log('PASS: readable empty activity, unknown payment, and lock clears review state');

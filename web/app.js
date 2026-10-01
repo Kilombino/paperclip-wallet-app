@@ -12,7 +12,13 @@ async function api(path, body) {
     headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
     ...(body === undefined ? {} : {body: JSON.stringify(body)})
   });
-  if (!response.ok) throw new Error('Wallet request failed (' + response.status + '). Check the token, wallet, and local services.');
+  if (!response.ok) {
+    let message = '';
+    try { const detail = await response.json(); message = typeof detail.message === 'string' ? detail.message.slice(0, 900) : ''; } catch {}
+    if (message.includes('no pending lightning receive')) message = 'No received payment matches this invoice in this wallet. An invoice from another wallet belongs in Pay someone, not Received status.';
+    if (message.includes('dust') || message.includes('funded-HTLC minimum')) message = 'Payment cannot be constructed: the HTLC or remaining change is too small after recovery reserves. Check your Ark balance and try a larger payment or refresh eligible inputs.';
+    throw new Error(message || 'Wallet request failed (' + response.status + '). Check wallet access and local services.');
+  }
   return response.status === 204 ? null : response.json();
 }
 async function update() {
@@ -143,6 +149,7 @@ $('ln-pay').onsubmit = event => { event.preventDefault(); run(event.submitter, a
   if (!confirm('Pay ' + (amount === null ? 'the invoice amount' : amount.toLocaleString() + ' sats') + ' from Ark on ' + network + '?\n' + destination + '\n\nService fees plus 4,000–6,000 sats of recovery reserves per input apply. Failed payments may also consume refund reserves.')) return;
   const result = await mutate('lightning/pay', {destination, amount_sat: amount, comment: null});
   $('ln-result').textContent = JSON.stringify(result, null, 2);
+  paymentSummary('Submitted', 'Payment submitted once. Check Sent status before trying again.');
   if (result.payment_hash) { $('ln-identifier').value = result.payment_hash; $('ln-direction').value = 'sends'; }
   $('ln-destination').value = ''; $('ln-amount').value = '';
   status('Payment submitted. Check its status before making another payment.');
@@ -153,14 +160,18 @@ $('ln-receive').onsubmit = event => { event.preventDefault(); run(event.submitte
   const result = await mutate('lightning/receives/invoice', {
     amount_sat: amount, description: $('ln-description').value.trim() || null, token: null
   });
-  $('ln-invoice').textContent = result.invoice;
+  $('ln-invoice').textContent = result.invoice; $('ln-copy').hidden = false;
+  paymentSummary('Awaiting payment', 'Share this invoice. Keep the wallet online until settlement completes.');
   $('ln-identifier').value = result.invoice; $('ln-direction').value = 'receives';
   status('Invoice created. A payment is not settled until the wallet reports completion.');
 }); };
 $('ln-check').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
   const identifier = $('ln-identifier').value.trim(), direction = $('ln-direction').value;
   if (!identifier || !['sends', 'receives'].includes(direction)) throw new Error('Choose a payment and direction.');
-  $('ln-result').textContent = JSON.stringify(await api('lightning/' + direction + '/' + encodeURIComponent(identifier)), null, 2);
+  const result = await api('lightning/' + direction + '/' + encodeURIComponent(identifier));
+  $('ln-result').textContent = JSON.stringify(result, null, 2);
+  const state = typeof result.state === 'string' ? result.state : 'See details';
+  paymentSummary(state, state === 'unknown' ? 'No outgoing payment is recorded for this identifier. Checking status does not pay an invoice.' : 'Status from your wallet. Review the details before submitting any further payment.');
   status('Payment status updated.');
 }); };
 $('history-load').onclick = event => run(event.target, async () => {
@@ -168,6 +179,7 @@ $('history-load').onclick = event => run(event.target, async () => {
     api('history'), api('onchain/transactions'), api('lightning/receives')
   ]);
   $('history').textContent = JSON.stringify({ark, onchain, lightning_receives: receives}, null, 2);
+  renderActivity(ark);
   status('Activity updated.');
 });
 const lockSession = $('lock').onclick;
@@ -205,3 +217,31 @@ $('exit-claim').onclick = event => run(event.target, async () => {
   const address = await api('onchain/addresses/next', {});
   await mutate('exits/claim/all', {destination: address.address}); await update(); status('Claim submitted. Wait for confirmation.');
 });
+
+function paymentSummary(title, detail) {
+  const box = $('payment-summary'); box.hidden = false;
+  box.textContent = title.replaceAll('_', ' ') + ' — ' + detail;
+}
+$('ln-copy').onclick = event => run(event.target, async () => {
+  await navigator.clipboard.writeText($('ln-invoice').textContent); status('Invoice copied.');
+});
+function renderActivity(records) {
+  const list = $('activity-list'); list.replaceChildren();
+  const rows = Array.isArray(records) ? records : [];
+  $('activity-summary').textContent = rows.length + ' Ark movements · ' + rows.filter(r => r.status === 'pending').length + ' pending';
+  if (!rows.length) { list.textContent = 'No Ark activity yet. Deposits and payments will appear here.'; return; }
+  for (const row of rows) {
+    const card = document.createElement('article'); card.className = 'activity-row';
+    const amount = Number.isSafeInteger(row.effective_balance_sat) ? row.effective_balance_sat : null;
+    const heading = document.createElement('strong');
+    heading.textContent = (row.subsystem?.name || 'Ark') + ' · ' + (row.subsystem?.kind || 'Movement');
+    const value = document.createElement('span'); value.className = amount > 0 ? 'positive' : 'amount';
+    value.textContent = amount === null ? 'Amount unavailable' : (amount > 0 ? '+' : '') + amount.toLocaleString() + ' sats';
+    const detail = document.createElement('p');
+    const date = new Date(row.time?.created_at);
+    detail.textContent = (row.status || 'Unknown') + ' · ' + (Number.isFinite(date.getTime()) ? date.toLocaleString() : 'Time unavailable') + ' · Fee: ' + (Number.isSafeInteger(row.offchain_fee_sat) ? row.offchain_fee_sat.toLocaleString() + ' sats' : 'unavailable');
+    card.append(heading, value, detail); list.append(card);
+  }
+}
+const reviewLock = $('lock').onclick;
+$('lock').onclick = () => { reviewLock(); $('activity-list').replaceChildren(); $('activity-summary').textContent = ''; $('payment-summary').textContent = ''; $('payment-summary').hidden = true; $('ln-copy').hidden = true; };
