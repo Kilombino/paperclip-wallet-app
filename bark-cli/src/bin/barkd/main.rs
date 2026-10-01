@@ -364,6 +364,7 @@ fn wallet_create_request_to_create_opts(req: CreateWalletRequest) -> anyhow::Res
 		mnemonic: mnemonic,
 		birthday_height: req.birthday_height.map(Into::into),
 		config: config,
+		write_mnemonic_file: true,
 	})
 }
 

@@ -297,6 +297,11 @@ pub struct CreateOpts {
 
 	#[command(flatten)]
 	pub config: ConfigOpts,
+
+	/// Keep the mnemonic in the datadir. An app that holds the mnemonic itself
+	/// (encrypted by the platform) turns this off and passes it in memory.
+	#[arg(skip = true)]
+	pub write_mnemonic_file: bool,
 }
 
 /// Non-wallet files barkd leaves in the datadir; they must survive a wallet create.
@@ -462,9 +467,11 @@ async fn try_create_wallet(
 	let mnemonic = opts.mnemonic.unwrap_or_else(|| bip39::Mnemonic::generate(12).expect("12 is valid"));
 	let seed = mnemonic.to_seed("");
 
-	fs_perms::create_new_owner_only(
-		&datadir.join(MNEMONIC_FILE), mnemonic.to_string().as_bytes(),
-	)?;
+	if opts.write_mnemonic_file {
+		fs_perms::create_new_owner_only(
+			&datadir.join(MNEMONIC_FILE), mnemonic.to_string().as_bytes(),
+		)?;
+	}
 
 	// open db
 	let db: Arc<dyn BarkPersister + Send + Sync> = if opts.use_filestore {
@@ -541,6 +548,31 @@ pub async fn open_wallet(datadir: &Path, user_agent: &str) -> anyhow::Result<Opt
 	let mnemonic_str = tokio::fs::read_to_string(&mnemonic_path).await
 		.with_context(|| format!("failed to read mnemonic file at {}", mnemonic_path.display()))?;
 	let mnemonic = bip39::Mnemonic::from_str(&mnemonic_str).context("broken mnemonic")?;
+
+	open_wallet_inner(datadir, user_agent, mnemonic).await.map(Some)
+}
+
+/// Open the wallet in `datadir` with a mnemonic the caller holds, for wallets
+/// created with `write_mnemonic_file` off. Returns `None` when the datadir has
+/// no wallet yet.
+pub async fn open_wallet_with_mnemonic(
+	datadir: &Path,
+	user_agent: &str,
+	mnemonic: bip39::Mnemonic,
+) -> anyhow::Result<Option<BarkWallet>> {
+	let has_db = datadir.join(DB_FILE).exists() || datadir.join(FILESTORE_FILE).exists();
+	if !has_db {
+		return Ok(None);
+	}
+	fs_perms::warn_if_loose(datadir, 0o700);
+	open_wallet_inner(datadir, user_agent, mnemonic).await.map(Some)
+}
+
+async fn open_wallet_inner(
+	datadir: &Path,
+	user_agent: &str,
+	mnemonic: bip39::Mnemonic,
+) -> anyhow::Result<BarkWallet> {
 	let seed = mnemonic.to_seed("");
 
 	let use_filestore = datadir.join(FILESTORE_FILE).exists();
@@ -581,7 +613,7 @@ pub async fn open_wallet(datadir: &Path, user_agent: &str) -> anyhow::Result<Opt
 		},
 	).await?;
 
-	Ok(Some(bark_wallet))
+	Ok(bark_wallet)
 }
 
 #[cfg(test)]
@@ -610,6 +642,7 @@ mod test {
 			mnemonic: None,
 			birthday_height: None,
 			config: ConfigOpts::default(),
+			write_mnemonic_file: true,
 		}
 	}
 

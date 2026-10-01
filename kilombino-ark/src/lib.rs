@@ -8,20 +8,22 @@
 //!   the app in memory (never written to disk), so other apps on the phone that find
 //!   the port cannot use it;
 //! - chain data over Esplora (mempool.kilombino.com/api), because a phone cannot run a
-//!   Knots node.
+//!   Knots node;
+//! - the mnemonic never touches disk: the app keeps it encrypted by the Android Keystore
+//!   and hands it over in memory on every start and on wallet creation.
 //!
-//! JNI surface: `start(datadir, port) -> token` and `stop()`. Everything else is HTTP.
+//! JNI surface: `start(datadir, port, mnemonic) -> token` and `stop()`. Everything else is HTTP.
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, Once, OnceLock};
 
 use anyhow::Context;
 use bitcoin::secp256k1::rand::{self, RngCore};
 use log::{info, warn};
 
 use bark_cli::connection;
-use bark_cli::wallet::{ConfigOpts, CreateOpts, create_wallet, open_wallet};
+use bark_cli::wallet::{ConfigOpts, CreateOpts, create_wallet, open_wallet_with_mnemonic};
 use bark_json::web::{BarkNetwork, BitcoindAuth, ChainSourceConfig, CreateWalletRequest};
 use bark_rest::auth::AuthToken;
 use bark_rest::{Config, OnWalletCreate, OnWalletDelete, RestServer, ServerState};
@@ -39,6 +41,9 @@ struct Running {
 
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
+// The global logger can be set only once per process; the engine restarts (for a backup)
+// without the process ending.
+static LOGGING: Once = Once::new();
 
 fn runtime() -> &'static tokio::runtime::Runtime {
 	RUNTIME.get_or_init(|| {
@@ -53,10 +58,10 @@ fn runtime() -> &'static tokio::runtime::Runtime {
 }
 
 fn create_opts(req: CreateWalletRequest) -> anyhow::Result<CreateOpts> {
-	let mnemonic = match req.mnemonic {
-		Some(m) => Some(bip39::Mnemonic::from_str(&m).context("invalid mnemonic")?),
-		None => None,
-	};
+	// The app always supplies the words (new or shared with its XBT wallet), so no
+	// wallet is ever created with a seed only the datadir knows.
+	let words = req.mnemonic.context("the app must supply the mnemonic")?;
+	let mnemonic = Some(bip39::Mnemonic::from_str(&words).context("invalid mnemonic")?);
 	#[allow(deprecated)]
 	let mut config = ConfigOpts {
 		ark: req.ark_server,
@@ -93,12 +98,14 @@ fn create_opts(req: CreateWalletRequest) -> anyhow::Result<CreateOpts> {
 		mnemonic,
 		birthday_height: req.birthday_height.map(Into::into),
 		config,
+		write_mnemonic_file: false,
 	})
 }
 
 /// Starts the wallet daemon and its REST API. Returns the bearer token to use.
+/// `mnemonic` is `None` while the app has no Ark wallet yet.
 /// Starting twice returns an error rather than a second daemon.
-pub fn start(datadir: &Path, port: u16) -> anyhow::Result<String> {
+pub fn start(datadir: &Path, port: u16, mnemonic: Option<&str>) -> anyhow::Result<String> {
 	let mut running = RUNNING.lock().unwrap();
 	anyhow::ensure!(running.is_none(), "already running");
 
@@ -107,19 +114,27 @@ pub fn start(datadir: &Path, port: u16) -> anyhow::Result<String> {
 	unsafe { std::env::set_var("PAPERCLIP_XBT_MAINNET", "1"); }
 
 	std::fs::create_dir_all(datadir).with_context(|| format!("create {}", datadir.display()))?;
-	bark_cli::log::init_logging(false, true, datadir, None, false);
+	LOGGING.call_once(|| bark_cli::log::init_logging(false, true, datadir, None, false));
 
 	let mut secret = [0u8; 32];
 	rand::thread_rng().fill_bytes(&mut secret);
 	let token = AuthToken::new(secret);
 	let encoded = token.encode();
 
+	let mnemonic = match mnemonic {
+		Some(m) => Some(bip39::Mnemonic::from_str(m).context("invalid mnemonic")?),
+		None => None,
+	};
+
 	let datadir = datadir.to_path_buf();
 	let r = runtime().block_on(async move {
 		let lock = connection::acquire_barkd_lock(&datadir)?;
 		let shutdown = CancellationToken::new();
 
-		let wallet = open_wallet(&datadir, USER_AGENT).await?;
+		let wallet = match mnemonic {
+			Some(m) => open_wallet_with_mnemonic(&datadir, USER_AGENT, m).await?,
+			None => None,
+		};
 		if let Some(w) = &wallet {
 			w.start_daemon()?;
 			info!("Ark wallet loaded, daemon started");
@@ -132,8 +147,11 @@ pub fn start(datadir: &Path, port: u16) -> anyhow::Result<String> {
 			move |req: CreateWalletRequest| {
 				let datadir = datadir.clone();
 				Box::pin(async move {
-					create_wallet(&datadir, USER_AGENT, create_opts(req)?).await?;
-					let wallet = open_wallet(&datadir, USER_AGENT).await?.expect("wallet just created");
+					let opts = create_opts(req)?;
+					let mnemonic = opts.mnemonic.clone().expect("checked in create_opts");
+					create_wallet(&datadir, USER_AGENT, opts).await?;
+					let wallet = open_wallet_with_mnemonic(&datadir, USER_AGENT, mnemonic).await?
+						.context("wallet just created")?;
 					if let Err(e) = wallet.refresh_server().await {
 						warn!("Ark server handshake failed on wallet creation: {:#}", e);
 					}
@@ -191,15 +209,22 @@ mod jni_api {
 	use jni::objects::{JClass, JString};
 	use jni::sys::{jint, jstring};
 
-	/// `ArkNative.start(datadir, port)`: the bearer token, or "ERR:<message>".
+	/// `ArkNative.start(datadir, port, mnemonic)`: the bearer token, or "ERR:<message>".
+	/// `mnemonic` is null while the app has no Ark wallet yet.
 	#[unsafe(no_mangle)]
 	pub extern "system" fn Java_com_kilombino_pyblockwatch_ark_ArkNative_start<'l>(
 		mut env: JNIEnv<'l>, _class: JClass<'l>, datadir: JString<'l>, port: jint,
+		mnemonic: JString<'l>,
 	) -> jstring {
+		let words: Option<String> = if mnemonic.is_null() {
+			None
+		} else {
+			env.get_string(&mnemonic).ok().map(Into::into)
+		};
 		let out = match env.get_string(&datadir) {
 			Ok(d) => {
 				let d: String = d.into();
-				match start(&PathBuf::from(d), port as u16) {
+				match start(&PathBuf::from(d), port as u16, words.as_deref()) {
 					Ok(token) => token,
 					Err(e) => format!("ERR:{:#}", e),
 				}
