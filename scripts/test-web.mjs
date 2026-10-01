@@ -10,11 +10,11 @@ function fixture(network, lightningEnabled = true, empty = false) {
   const element = id => {
     assert(ids.has(id), 'UI element must exist in the HTML: ' + id);
     if (!elements.has(id)) elements.set(id, {value: '', textContent: '', hidden: false,
-      replaceChildren() {}, append() {}, addEventListener(type, fn) { this[type] = fn; }});
+      setAttribute() {}, replaceChildren() {}, append() {}, addEventListener(type, fn) { this[type] = fn; }});
     return elements.get(id);
   };
   let failPath = null;
-  const context = vm.createContext({document: {getElementById: element}, confirm: () => true, URL, btoa,
+  const context = vm.createContext({document: {getElementById: element}, confirm: () => true, URL, btoa, setInterval: () => {}, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     fetch: async (path, options) => {
       calls.push({path, options});
       if (failPath && path.endsWith(failPath)) throw Error('Transport interrupted');

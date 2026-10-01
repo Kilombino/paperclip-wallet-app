@@ -1,7 +1,7 @@
 'use strict';
 let token = '';
 let network = null;
-let uncertainMutation = false;
+let uncertainMutation = sessionRead('paperclip.uncertain') === '1';
 let lightningEnabled = false;
 let setupPending = false;
 const $ = id => document.getElementById(id);
@@ -22,7 +22,9 @@ async function api(path, body) {
   return response.status === 204 ? null : response.json();
 }
 async function update() {
+  const sessionToken = token;
   const [balance, chain, vtxos, exits] = await Promise.all([api('wallet/balance'), api('onchain/balance'), api('wallet/vtxos'), api('exits/status/all')]);
+  if (!token || token !== sessionToken) return;
   $('exits').textContent = JSON.stringify(exits, null, 2);
   $('ark-balance').textContent = Number.isSafeInteger(balance.spendable_sat) ? balance.spendable_sat.toLocaleString() : 'See details';
   $('chain-balance').textContent = Number.isSafeInteger(chain.confirmed_sat) ? chain.confirmed_sat.toLocaleString() : 'See details';
@@ -48,9 +50,11 @@ async function connectWallet() {
     lightningEnabled = info.lightning_enabled === true;
     $('ln-controls').disabled = !lightningEnabled;
     $('ln-capability').textContent = lightningEnabled ? 'Experimental XBT Lightning enabled. Channel and Ark pool liquidity are required. Recovery reserves are included in your payment cost.' : 'This ASP has not enabled funded Lightning. Payment controls are unavailable.';
-    $('network').textContent = network === 'bitcoin' ? 'XBT MAINNET · EXPERIMENTAL' : 'XBT REGTEST';
+    $('network').textContent = network === 'bitcoin' ? 'XBT MAINNET Â· EXPERIMENTAL' : 'XBT REGTEST';
     await update();
     $('setup').hidden = true; $('login').hidden = true; $('wallet').hidden = false;
+    $('submission-warning').hidden = !uncertainMutation;
+    if ($('remember-session').checked) sessionWrite('paperclip.session', token);
     status('Wallet connected. Verify the displayed network before funding.');
 }
 $('unlock').addEventListener('submit', event => { event.preventDefault(); run(event.submitter, async () => {
@@ -118,10 +122,12 @@ $('refresh').onclick = event => run(event.target, async () => {
 // Do not automatically retry an operation after an ambiguous transport failure.
 async function mutate(path, body) {
   if (!token || !network) throw new Error('Unlock and verify the wallet network first.');
-  if (uncertainMutation) throw new Error('A prior submission needs checking. Review wallet history with the CLI before reloading and retrying.');
-  uncertainMutation = true;
+  if (uncertainMutation) throw new Error('A prior submission needs checking. Review Activity and payment status, then acknowledge the result before retrying.');
+  uncertainMutation = true; sessionWrite('paperclip.uncertain', '1');
+  $('submission-warning').hidden = false;
   const result = await api(path, body);
-  uncertainMutation = false;
+  uncertainMutation = false; sessionWrite('paperclip.uncertain', null);
+  $('submission-warning').hidden = true;
   return result;
 }
 
@@ -146,7 +152,7 @@ $('ln-pay').onsubmit = event => { event.preventDefault(); run(event.submitter, a
   if (!lightningEnabled) throw new Error('Lightning is not enabled in this wallet recovery profile.');
   const destination = $('ln-destination').value.trim(), amount = sats('ln-amount', true);
   if (!destination) throw new Error('Enter an XBT Lightning request.');
-  if (!confirm('Pay ' + (amount === null ? 'the invoice amount' : amount.toLocaleString() + ' sats') + ' from Ark on ' + network + '?\n' + destination + '\n\nService fees plus 4,000–6,000 sats of recovery reserves per input apply. Failed payments may also consume refund reserves.')) return;
+  if (!confirm('Pay ' + (amount === null ? 'the invoice amount' : amount.toLocaleString() + ' sats') + ' from Ark on ' + network + '?\n' + destination + '\n\nService fees plus 4,000â€“6,000 sats of recovery reserves per input apply. Failed payments may also consume refund reserves.')) return;
   const result = await mutate('lightning/pay', {destination, amount_sat: amount, comment: null});
   $('ln-result').textContent = JSON.stringify(result, null, 2);
   paymentSummary('Submitted', 'Payment submitted once. Check Sent status before trying again.');
@@ -220,7 +226,7 @@ $('exit-claim').onclick = event => run(event.target, async () => {
 
 function paymentSummary(title, detail) {
   const box = $('payment-summary'); box.hidden = false;
-  box.textContent = title.replaceAll('_', ' ') + ' — ' + detail;
+  box.textContent = title.replaceAll('_', ' ') + ' â€” ' + detail;
 }
 $('ln-copy').onclick = event => run(event.target, async () => {
   await navigator.clipboard.writeText($('ln-invoice').textContent); status('Invoice copied.');
@@ -228,20 +234,53 @@ $('ln-copy').onclick = event => run(event.target, async () => {
 function renderActivity(records) {
   const list = $('activity-list'); list.replaceChildren();
   const rows = Array.isArray(records) ? records : [];
-  $('activity-summary').textContent = rows.length + ' Ark movements · ' + rows.filter(r => r.status === 'pending').length + ' pending';
+  $('activity-summary').textContent = rows.length + ' Ark movements Â· ' + rows.filter(r => r.status === 'pending').length + ' pending';
   if (!rows.length) { list.textContent = 'No Ark activity yet. Deposits and payments will appear here.'; return; }
   for (const row of rows) {
     const card = document.createElement('article'); card.className = 'activity-row';
     const amount = Number.isSafeInteger(row.effective_balance_sat) ? row.effective_balance_sat : null;
     const heading = document.createElement('strong');
-    heading.textContent = (row.subsystem?.name || 'Ark') + ' · ' + (row.subsystem?.kind || 'Movement');
+    heading.textContent = ({'bark.arkoor':'Ark transfer','bark.lightning_send':'Lightning','bark.lightning_receive':'Lightning','bark.board':'Board','bark.round':'Round'}[row.subsystem?.name] || row.subsystem?.name || 'Ark') + ' Â· ' + (row.subsystem?.kind || 'Movement');
     const value = document.createElement('span'); value.className = amount > 0 ? 'positive' : 'amount';
     value.textContent = amount === null ? 'Amount unavailable' : (amount > 0 ? '+' : '') + amount.toLocaleString() + ' sats';
     const detail = document.createElement('p');
     const date = new Date(row.time?.created_at);
-    detail.textContent = (row.status || 'Unknown') + ' · ' + (Number.isFinite(date.getTime()) ? date.toLocaleString() : 'Time unavailable') + ' · Fee: ' + (Number.isSafeInteger(row.offchain_fee_sat) ? row.offchain_fee_sat.toLocaleString() + ' sats' : 'unavailable');
+    detail.textContent = (row.status || 'Unknown') + ' Â· ' + (Number.isFinite(date.getTime()) ? date.toLocaleString() : 'Time unavailable') + ' Â· Fee: ' + (Number.isSafeInteger(row.offchain_fee_sat) ? row.offchain_fee_sat.toLocaleString() + ' sats' : 'unavailable');
     card.append(heading, value, detail); list.append(card);
   }
 }
 const reviewLock = $('lock').onclick;
 $('lock').onclick = () => { reviewLock(); $('activity-list').replaceChildren(); $('activity-summary').textContent = ''; $('payment-summary').textContent = ''; $('payment-summary').hidden = true; $('ln-copy').hidden = true; };
+
+// A session belongs to one browser tab. Never save keys or RPC credentials here.
+function sessionRead(key) { try { return sessionStorage.getItem(key); } catch { return null; } }
+function sessionWrite(key, value) { try { if (value === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, value); } catch {} }
+function passwordToggle(buttonId, inputId) {
+  $(buttonId).onclick = () => { const shown = $(inputId).type === 'password'; $(inputId).type = shown ? 'text' : 'password'; $(buttonId).setAttribute('aria-pressed', String(shown)); $(buttonId).textContent = shown ? 'Hide password' : 'Show password'; };
+}
+passwordToggle('show-token', 'token'); passwordToggle('show-rpc-password', 'setup-password');
+$('remember-session').onchange = () => { if (!$('remember-session').checked) sessionWrite('paperclip.session', null); };
+const sessionLock = $('lock').onclick;
+$('lock').onclick = () => { sessionWrite('paperclip.session', null); sessionLock(); $('token').type = 'password'; $('show-token').textContent = 'Show password'; $('show-token').setAttribute('aria-pressed', 'false'); };
+const sessionSetupLock = $('setup-lock').onclick;
+$('setup-lock').onclick = () => { sessionWrite('paperclip.session', null); sessionSetupLock(); };
+$('submission-reviewed').onclick = () => {
+  if (!confirm('Have you checked Activity and the payment status? Continue only after resolving the previous submission. A pending payment must not be sent again.')) return;
+  uncertainMutation = false; sessionWrite('paperclip.uncertain', null); $('submission-warning').hidden = true;
+  status('Previous result acknowledged. No payment has been resubmitted.');
+};
+let refreshing = false;
+setInterval(async () => {
+  if (!token || !network || $('wallet').hidden || document.hidden || refreshing) return;
+  refreshing = true;
+  try { await update(); $('refresh-state').textContent = 'Updated ' + new Date().toLocaleTimeString(); }
+  catch { $('refresh-state').textContent = 'Update unavailable Â· retry with Update'; }
+  finally { refreshing = false; }
+}, 30000);
+(async () => {
+  const saved = sessionRead('paperclip.session'); if (!saved) return;
+  token = saved; $('remember-session').checked = true;
+  status('Restoring this tabâ€™s wallet sessionâ€¦');
+  try { await connectWallet(); }
+  catch { token = ''; network = null; sessionWrite('paperclip.session', null); status('Unlock again to reconnect. Your wallet data is unchanged.'); }
+})();
