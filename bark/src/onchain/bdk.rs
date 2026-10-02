@@ -440,6 +440,47 @@ impl OnchainWallet {
 	}
 
 
+	/// Build a transaction that spends exactly the coins in [outpoints] (coin control):
+	/// [amount] to [destination] with change back to the wallet, or, with no amount, all of
+	/// those coins to [destination]. Returns the unsigned PSBT, which also gives the fee.
+	pub fn prepare_selected_tx(
+		&mut self,
+		outpoints: &[bitcoin::OutPoint],
+		destination: Address,
+		amount: Option<Amount>,
+		fee_rate: FeeRate,
+	) -> anyhow::Result<Psbt> {
+		ensure!(!outpoints.is_empty(), "no coins selected");
+		let mut b = self.inner.build_tx();
+		b.add_utxos(outpoints).context("a selected coin is not in this wallet")?;
+		b.manually_selected_only();
+		match amount {
+			Some(amount) => { b.add_recipient(destination.script_pubkey(), amount); },
+			None => { b.drain_to(destination.script_pubkey()); },
+		}
+		b.fee_rate(fee_rate);
+		b.finish().context("error building tx from the selected coins")
+	}
+
+	/// Sign and broadcast a [Self::prepare_selected_tx] transaction.
+	pub async fn send_selected(
+		&mut self,
+		chain: &ChainSource,
+		outpoints: &[bitcoin::OutPoint],
+		destination: Address,
+		amount: Option<Amount>,
+		fee_rate: FeeRate,
+	) -> anyhow::Result<Txid> {
+		let psbt = self.prepare_selected_tx(outpoints, destination, amount, fee_rate)?;
+		let tx = self.sign_psbt(psbt).await?.extract_tx()?;
+		let txid = tx.compute_txid();
+		self.record_broadcast_tx(tx.clone()).await?;
+		if let Err(e) = chain.broadcast_tx(&tx).await {
+			warn!("broadcast for {txid} returned error, will retry on next sync: {e:#}");
+		}
+		Ok(txid)
+	}
+
 	pub async fn drain(
 		&mut self,
 		chain: &ChainSource,

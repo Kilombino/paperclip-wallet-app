@@ -642,6 +642,30 @@ pub struct OnchainSendManyRequest {
 	pub immediate: Option<bool>,
 }
 
+/// Coin control: spend exactly these on-chain coins.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+pub struct OnchainSendSelectedRequest {
+	/// The destination Bitcoin address
+	pub destination: String,
+	/// The amount to send (in satoshis); leave empty to send all of the selected coins
+	#[serde(default)]
+	pub amount_sat: Option<u64>,
+	/// The coins to spend, as "txid:vout"
+	pub outpoints: Vec<String>,
+}
+
+/// The cost of a coin-control send, before it is made.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+pub struct OnchainSendSelectedEstimate {
+	pub fee_sat: u64,
+	/// What the destination receives
+	pub amount_sat: u64,
+	/// Change back to the wallet
+	pub change_sat: u64,
+}
+
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
 pub struct OnchainDrainRequest {

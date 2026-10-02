@@ -35,6 +35,8 @@ pub fn router() -> Router<Arc<ServerState>> {
 		.route("/send", post(onchain_send))
 		.route("/send-many", post(onchain_send_many))
 		.route("/drain", post(onchain_drain))
+		.route("/send-selected", post(onchain_send_selected))
+		.route("/send-selected/estimate", post(onchain_send_selected_estimate))
 		.route("/utxos", get(onchain_utxos))
 		.route("/transactions", get(onchain_transactions))
 		.route("/sync", post(onchain_sync))
@@ -50,6 +52,8 @@ pub fn router() -> Router<Arc<ServerState>> {
 		onchain_send,
 		onchain_send_many,
 		onchain_drain,
+		onchain_send_selected,
+		onchain_send_selected_estimate,
 		onchain_utxos,
 		onchain_transactions,
 		onchain_sync,
@@ -65,6 +69,8 @@ pub fn router() -> Router<Arc<ServerState>> {
 		bark_json::web::OnchainSendRequest,
 		bark_json::web::OnchainSendManyRequest,
 		bark_json::web::OnchainDrainRequest,
+		bark_json::web::OnchainSendSelectedRequest,
+		bark_json::web::OnchainSendSelectedEstimate,
 		bark_json::primitives::UtxoInfo,
 		bark_json::primitives::TransactionInfo,
 		bark_json::primitives::WalletTxInfo,
@@ -204,6 +210,88 @@ pub async fn onchain_send(
 		.context("Failed to send onchain payment")?;
 
 	Ok(axum::Json(bark_json::cli::onchain::Send { txid }))
+}
+
+/// Parse a coin-control request into (coins, destination, amount).
+async fn selected_parts(
+	wallet: &bark::Wallet,
+	body: &bark_json::web::OnchainSendSelectedRequest,
+) -> HandlerResult<(Vec<bitcoin::OutPoint>, bitcoin::Address, Option<Amount>)> {
+	let net = wallet.network().await?;
+	let addr = bitcoin::Address::from_str(&body.destination)
+		.badarg("Invalid destination address")?
+		.require_network(net)
+		.badarg("Address is not valid for configured network")?;
+	let mut outpoints = Vec::with_capacity(body.outpoints.len());
+	for o in &body.outpoints {
+		outpoints.push(bitcoin::OutPoint::from_str(o).badarg("Invalid outpoint")?);
+	}
+	Ok((outpoints, addr, body.amount_sat.map(Amount::from_sat)))
+}
+
+#[utoipa::path(
+	post,
+	path = "/send-selected/estimate",
+	summary = "Estimate a coin-control send",
+	request_body = bark_json::web::OnchainSendSelectedRequest,
+	responses(
+		(status = 200, description = "The fee, amount and change", body = bark_json::web::OnchainSendSelectedEstimate),
+		(status = 400, description = "Invalid address, coin or amount", body = error::BadRequestError),
+	),
+	description = "Builds, without signing or sending, the transaction that spends exactly the \
+		given coins, and returns its fee, what the destination gets and the change.",
+	tag = "onchain"
+)]
+#[debug_handler]
+pub async fn onchain_send_selected_estimate(
+	State(state): State<Arc<ServerState>>,
+	Json(body): Json<bark_json::web::OnchainSendSelectedRequest>,
+) -> HandlerResult<Json<bark_json::web::OnchainSendSelectedEstimate>> {
+	let wallet = state.require_wallet()?;
+	let onchain = state.require_onchain()?;
+	let (outpoints, addr, amount) = selected_parts(&wallet, &body).await?;
+	let fee_rate = wallet.chain().fee_rates().await.regular;
+	let dest_spk = addr.script_pubkey();
+	let psbt = cast_bdk_mut(&mut *onchain.write().await)?
+		.prepare_selected_tx(&outpoints, addr, amount, fee_rate)
+		.badarg("Cannot build the transaction from these coins")?;
+	let fee = psbt.fee().context("fee")?;
+	let to_dest = psbt.unsigned_tx.output.iter().filter(|o| o.script_pubkey == dest_spk)
+		.map(|o| o.value).sum::<Amount>();
+	let total_out = psbt.unsigned_tx.output.iter().map(|o| o.value).sum::<Amount>();
+	Ok(Json(bark_json::web::OnchainSendSelectedEstimate {
+		fee_sat: fee.to_sat(),
+		amount_sat: to_dest.to_sat(),
+		change_sat: (total_out - to_dest).to_sat(),
+	}))
+}
+
+#[utoipa::path(
+	post,
+	path = "/send-selected",
+	summary = "Send from chosen coins (coin control)",
+	request_body = bark_json::web::OnchainSendSelectedRequest,
+	responses(
+		(status = 200, description = "Returns the send result", body = bark_json::cli::onchain::Send),
+		(status = 400, description = "Invalid address, coin or amount", body = error::BadRequestError),
+	),
+	description = "Spends exactly the given coins: the amount to the destination with change \
+		back to the wallet, or all of them to the destination when no amount is given.",
+	tag = "onchain"
+)]
+#[debug_handler]
+pub async fn onchain_send_selected(
+	State(state): State<Arc<ServerState>>,
+	Json(body): Json<bark_json::web::OnchainSendSelectedRequest>,
+) -> HandlerResult<Json<bark_json::cli::onchain::Send>> {
+	let wallet = state.require_wallet()?;
+	let onchain = state.require_onchain()?;
+	let (outpoints, addr, amount) = selected_parts(&wallet, &body).await?;
+	let fee_rate = wallet.chain().fee_rates().await.regular;
+	let txid = cast_bdk_mut(&mut *onchain.write().await)?
+		.send_selected(wallet.chain(), &outpoints, addr, amount, fee_rate).await
+		.context("Failed to send from the selected coins")?;
+	Ok(Json(bark_json::cli::onchain::Send { txid }))
 }
 
 #[utoipa::path(
