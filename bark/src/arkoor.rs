@@ -369,7 +369,26 @@ impl Wallet {
 				total, required, required - amount);
 			inputs
 		} else {
-			self.select_arkoor_inputs(candidates, amount, reserve, tip).await?
+			// The default selection takes coins in its own order and can end up adding a
+			// coin for a few sats that would be dust. Then try paying from one coin alone,
+			// the smallest that is enough, before giving up with the original error.
+			let first = match self.select_arkoor_inputs(candidates.clone(), amount, reserve, tip).await {
+				Ok(inputs) => match self.check_arkoor_inputs(inputs, amount, policy.clone(), change, tip).await {
+					Ok(plan) => return Ok(plan),
+					Err(e) => e,
+				},
+				Err(e) => e,
+			};
+			let mut singles = candidates.into_iter()
+				.filter(|v| v.amount() >= amount + reserve * 2)
+				.collect::<Vec<_>>();
+			singles.sort_by_key(|v| v.amount());
+			for v in singles {
+				if let Ok(plan) = self.check_arkoor_inputs(vec![v], amount, policy.clone(), change, tip).await {
+					return Ok(plan);
+				}
+			}
+			return Err(first);
 		};
 		self.check_arkoor_inputs(inputs, amount, policy, change, tip).await
 	}
