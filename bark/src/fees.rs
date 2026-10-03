@@ -73,7 +73,7 @@ impl Wallet {
 	pub async fn estimate_arkoor_payment_fee(&self, amount: Amount) -> anyhow::Result<FeeEstimate> {
 		let (change, _) = self.peek_next_keypair().await?;
 		let policy = ark::VtxoPolicy::new_pubkey(change.public_key());
-		let (inputs, reserve) = self.plan_arkoor_payment(amount, policy, change.public_key()).await?;
+		let (inputs, reserve, _) = self.plan_arkoor_payment(amount, policy, change.public_key()).await?;
 		Ok(FeeEstimate::new(
 			amount.checked_add(reserve).context("payment amount overflow")?, reserve, amount,
 			inputs.iter().map(|v| v.id()).collect(),
@@ -88,7 +88,7 @@ impl Wallet {
 		let (change, _) = self.peek_next_keypair().await?;
 		ensure!(destination.policy().user_pubkey() != change.public_key(),
 			"Cannot create arkoor to same address as change");
-		let (inputs, reserve) = self.plan_arkoor_payment(
+		let (inputs, reserve, _) = self.plan_arkoor_payment(
 			amount, destination.policy().clone(), change.public_key(),
 		).await?;
 		Ok(FeeEstimate::new(

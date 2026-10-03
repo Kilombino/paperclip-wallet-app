@@ -1,6 +1,6 @@
 # Recovery costs and low-cost transfers
 
-## Current signed profile
+## Legacy transfer budget
 
 An Ark transfer has no separate service fee. It still deducts 4,000 sats per
 input with one output, or 6,000 sats per input with recipient and change outputs.
@@ -43,3 +43,21 @@ Show recipient amount, service fee, recovery allocation, total debit and net
 received before confirmation. State that allocations are not separately refundable.
 Never label the whole allocation a miner fee. Link current capability documentation
 from historical test reports; do not present old restrictions as current behavior.
+
+## Negotiated small-anchor transfers
+
+New servers advertise `small_anchor_transfers`. Updated wallets use 330-sat
+standard P2WSH anchors and retain the 1,000-sat miner fee for ordinary Ark sends.
+One input costs 2,660 sats without change or 3,990 sats with change. The sender
+funds the entire allocation; the ASP does not subsidize the transfer.
+
+The wallet uses the same builder for estimates and sends. It persists the
+selected budget in the action before cosigning. Retries keep that budget even
+if server capabilities change. Old action records default to the legacy budget.
+Do not downgrade a wallet with pending small-anchor actions to an older binary.
+
+This capability does not change the version-2 recovery encoding, old signed
+ancestors, round funding, boarding, Lightning contracts, or offboard preparation.
+Old clients can continue to request the legacy budget. An old server does not
+advertise this capability, so an updated wallet uses the legacy budget there.
+A deployment needs both server support and an updated sending wallet.

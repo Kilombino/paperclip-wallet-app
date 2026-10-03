@@ -223,6 +223,7 @@ impl Wallet {
 		inputs: impl IntoIterator<Item = WalletVtxo>,
 		change_keypair: Keypair,
 		change_pieces: Option<Vec<Amount>>,
+		small_anchor_transfer: bool,
 	) -> Result<ArkoorCreateResult, ArkoorCreateError> {
 		let (mut srv, _) = self.require_server().await?;
 		let input_ids = inputs.into_iter().map(|v| v.id()).collect::<Vec<_>>();
@@ -265,8 +266,10 @@ impl Wallet {
 		// The profile fixes the output allocation. Older split-piece hints cannot
 		// change recipient amounts or create dust recovery outputs.
 		let _ = change_pieces;
-		let (builder, recovery_reserve) = ArkoorPackageBuilder::new_funded_payment(
-			inputs, arkoor_dest.clone(), VtxoPolicy::new_pubkey(change_pubkey),
+		let funding = if small_anchor_transfer { ark::exit_policy::small_anchor_transfer_funding() }
+			else { ark::exit_policy::paperclip_funding() };
+		let (builder, recovery_reserve) = ArkoorPackageBuilder::new_funded_payment_with_funding(
+			inputs, arkoor_dest.clone(), VtxoPolicy::new_pubkey(change_pubkey), funding,
 		).context("insufficient funded recovery reserves; refresh or select more inputs")?;
 		let builder = builder.generate_user_nonces(&user_keypairs)
 			.context("invalid nb of keypairs")?;
@@ -334,9 +337,12 @@ impl Wallet {
 	/// Read-only plan shared by estimates and sends. No keys, locks or signatures are created.
 	pub(crate) async fn plan_arkoor_payment(
 		&self, amount: Amount, policy: VtxoPolicy, change: PublicKey,
-	) -> anyhow::Result<(Vec<WalletVtxo>, Amount)> {
+	) -> anyhow::Result<(Vec<WalletVtxo>, Amount, bool)> {
 		self.inner.chain.require_funded_policy().await?;
-		let _ = self.require_server().await?;
+		let (_, info) = self.require_server().await?;
+		let small_anchor_transfer = info.small_anchor_transfers;
+		let funding = if small_anchor_transfer { ark::exit_policy::small_anchor_transfer_funding() }
+			else { ark::exit_policy::paperclip_funding() };
 		ensure!(amount > Amount::ZERO, "payment amount must be positive");
 		let tip = self.inner.chain.tip().await?;
 		let candidates = self.spendable_vtxos().await?;
@@ -348,9 +354,9 @@ impl Wallet {
 		let (inputs, recovery_reserve) = selection.select_ark_constructible(candidates, |inputs| {
 			let hydrated = inputs.iter().map(|v| full.get(&v.id()).cloned()
 				.context("Missing Ark input ancestry")).collect::<anyhow::Result<Vec<_>>>()?;
-			match ArkoorPackageBuilder::new_funded_payment(hydrated,
+			match ArkoorPackageBuilder::new_funded_payment_with_funding(hydrated,
 				ArkoorDestination { total_amount: amount, policy: policy.clone() },
-				VtxoPolicy::new_pubkey(change),
+				VtxoPolicy::new_pubkey(change), funding,
 			) {
 				Ok((_, reserve)) => Ok(Some(reserve)),
 				Err(ArkoorConstructionError::Dust | ArkoorConstructionError::Unbalanced { .. }) => Ok(None),
@@ -366,7 +372,7 @@ impl Wallet {
 				.and_then(|v| v.checked_add(tip.to_u32())).context("exit deadline overflow")?;
 			ensure!(deadline < input.expiry_height().to_u32(), "refresh required before another transfer");
 		}
-		Ok((inputs, recovery_reserve))
+		Ok((inputs, recovery_reserve, small_anchor_transfer))
 	}
 
 	/// Returns every in-progress arkoor send checkpoint.
