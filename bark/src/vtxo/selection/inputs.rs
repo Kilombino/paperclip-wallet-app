@@ -490,6 +490,31 @@ mod test {
 	}
 
 	#[test]
+	fn constructible_ark_reduces_fragmentation_and_accepts_exact_spend() {
+		let key = DummyTestVtxoSpec::default().user_keypair.public_key();
+		for (values, expected, cost) in [
+			(vec![14_000], vec![14_000], 4_000),
+			(vec![8_000, 8_000, 30_000], vec![30_000], 6_000),
+			(vec![15_000, 30_000], vec![30_000], 6_000),
+		] {
+			let inputs = values.iter().enumerate().map(|(i, v)| funded_input(*v, 1000 + i as u32)).collect::<Vec<_>>();
+			let (chosen, reserve) = InputSelection::new().select_constructible(
+				inputs.iter().map(|(v, _)| v.clone()).collect(), |chosen| {
+				let full = chosen.iter().map(|v| inputs.iter().find(|(w, _)| w.id() == v.id()).unwrap().1.clone()).collect();
+				match ArkoorPackageBuilder::new_funded_payment(full, ArkoorDestination {
+					total_amount: Amount::from_sat(10_000), policy: VtxoPolicy::new_pubkey(key),
+				}, VtxoPolicy::new_pubkey(key)) {
+					Ok((_, reserve)) => Ok(Some(reserve)),
+					Err(ArkoorConstructionError::Dust | ArkoorConstructionError::Unbalanced { .. }) => Ok(None),
+					Err(error) => Err(error.into()),
+				}
+			}).unwrap();
+			assert_eq!(amounts(&chosen), expected);
+			assert_eq!(reserve.to_sat(), cost);
+		}
+	}
+
+	#[test]
 	fn constructible_selection_skips_fragmented_prefix() {
 		let candidates = vec![dummy_wallet_vtxo(45_800, 100),
 			dummy_wallet_vtxo(84_805, 200), dummy_wallet_vtxo(10_000, 200)];

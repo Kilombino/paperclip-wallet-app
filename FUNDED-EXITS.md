@@ -1,6 +1,6 @@
 # Funded recovery profile 2
 
-This is a private experimental implementation for ordinary public-key balances.
+This is the experimental funded recovery profile used by the Paperclip public beta.
 Regtest is the default. Mainnet opt-in and its prerequisites are in MAINNET.md.
 
 The wallet requires `ArkInfo.exit_profile = 2`. A board request includes the
@@ -27,7 +27,11 @@ fee-bump reserve. The parent can relay without an anchor child.
   round wallet. Operators must budget for this subsidy.
 - Reserves are excluded from spendable balances. They are not separately
   refundable deposits. They are consumed by the recovery graph if it is used;
-  cooperative settlement follows the existing Ark reclaim rules.
+  cooperative settlement follows the existing Ark reclaim rules. Unused backing
+  can be reclaimed by the server after the applicable expiry. Refresh does not
+  refund prior recovery allocations. These allocations are not immediate miner
+  fees, and reclaimed value must not be counted as pure profit without accounting
+  for server-funded trees, settlement liabilities, and on-chain costs.
 
 Outputs must leave at least 330 sats after a 1,000-sat final-claim allowance.
 Payments or change below 1,330 sats are refused. Some fragmented input sets
@@ -74,9 +78,10 @@ new positions when reported relay, mempool, or dust fees exceed the tested
 envelope. Recovery of existing positions remains available separately.
 
 Unified ALL signatures remain mandatory. Mainnet requires a separate explicit opt-in; see MAINNET.md.
-Lightning HTLCs and server liquidity-pool allocation are outside this profile;
-the server rejects configurations with a CLN backend. Use an empty VTXO pool
-for these tests. A separate review and test program is required for those paths.
+Funded Lightning HTLCs and server liquidity-pool allocation require explicit
+`experimental_funded_lightning` opt-in and a compatible CLN backend. They are
+supported by the current server. See `LIGHTNING.md` for activation and tested
+limits. Historical ordinary-balance test fixtures use an empty VTXO pool.
 
 See the companion ASP's `scripts/test-default-policy.sh` and validation report
 for the exact checks that passed. A successful standalone transaction test is
@@ -89,7 +94,7 @@ It requires no P2A or TRUC support. Unified XBT signatures still carry 0x21.
 The public anchor is not a protected user balance. It can be spent by anyone.
 
 VTXO encoding 4 and tree encoding 4 explicitly identify the signed exit format.
-Decoders retain versions 1–3. Old data reconstructs the original version-3 P2A
+Decoders retain versions 1â€“3. Old data reconstructs the original version-3 P2A
 transactions exactly; it is never reinterpreted as version 2. New clients reject
 a mismatched ASP profile before boarding. Old positions require cooperative
 refresh to gain the new format; direct transfers cannot mix recovery profiles.

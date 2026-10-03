@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Context;
 use bitcoin::{Amount, NetworkKind};
 use bitcoin::hex::DisplayHex;
@@ -5,7 +7,7 @@ use bitcoin::secp256k1::{Keypair, PublicKey};
 use log::{error, info, warn};
 
 use ark::{ProtocolEncoding, VtxoPolicy};
-use ark::arkoor::ArkoorDestination;
+use ark::arkoor::{ArkoorDestination, ArkoorConstructionError};
 use ark::arkoor::package::{ArkoorPackageBuilder, ArkoorPackageCosignResponse};
 use ark::vtxo::{Full, Vtxo, VtxoId};
 use server_rpc::{protos, ServerConnection};
@@ -339,18 +341,22 @@ impl Wallet {
 		let tip = self.inner.chain.tip().await?;
 		let candidates = self.spendable_vtxos().await?;
 		let selection = self.spend_input_selection().await?.expires_after(tip);
-		let mut inputs = selection.select(candidates.clone(), amount)?;
-		let reserve = ark::exit_policy::paperclip_funding().per_transaction();
-		loop {
-			let count = u64::try_from(inputs.len()).context("input count overflow")?;
-			let required = amount.checked_add(reserve.checked_mul(
-				count.checked_mul(3).context("recovery reserve overflow")?,
-			).context("recovery reserve overflow")?).context("payment amount overflow")?;
-			let selected = selection.select(candidates.clone(), required)?;
-			let same_count = selected.len() == inputs.len();
-			inputs = selected;
-			if same_count { break; }
-		}
+		let candidates = selection.eligible(candidates);
+		let ids = candidates.iter().map(|v| v.id()).collect::<Vec<_>>();
+		let full = self.inner.db.get_full_vtxos(&ids).await?.into_iter()
+			.map(|v| (v.id(), v)).collect::<HashMap<_, _>>();
+		let (inputs, recovery_reserve) = selection.select_constructible(candidates, |inputs| {
+			let hydrated = inputs.iter().map(|v| full.get(&v.id()).cloned()
+				.context("Missing Ark input ancestry")).collect::<anyhow::Result<Vec<_>>>()?;
+			match ArkoorPackageBuilder::new_funded_payment(hydrated,
+				ArkoorDestination { total_amount: amount, policy: policy.clone() },
+				VtxoPolicy::new_pubkey(change),
+			) {
+				Ok((_, reserve)) => Ok(Some(reserve)),
+				Err(ArkoorConstructionError::Dust | ArkoorConstructionError::Unbalanced { .. }) => Ok(None),
+				Err(error) => Err(error.into()),
+			}
+		})?;
 		let ids = inputs.iter().map(|v| v.id()).collect::<Vec<_>>();
 		let full = self.inner.db.get_full_vtxos(&ids).await?;
 		for input in &full {
@@ -360,9 +366,6 @@ impl Wallet {
 				.and_then(|v| v.checked_add(tip.to_u32())).context("exit deadline overflow")?;
 			ensure!(deadline < input.expiry_height().to_u32(), "refresh required before another transfer");
 		}
-		let (_, recovery_reserve) = ArkoorPackageBuilder::new_funded_payment(
-			full, ArkoorDestination { total_amount: amount, policy }, VtxoPolicy::new_pubkey(change),
-		).context("payment would leave an unfunded or dust recovery output; refresh first")?;
 		Ok((inputs, recovery_reserve))
 	}
 

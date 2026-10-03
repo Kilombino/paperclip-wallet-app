@@ -131,7 +131,7 @@ $('send').addEventListener('submit', event => { event.preventDefault(); run(even
     'Estimated remaining balance: ' + quote.remaining_spendable_sat.toLocaleString() + ' sats';
   $('ark-estimate-values').textContent = review;
   $('ark-estimate').hidden = false;
-  if (!confirm(review + '\n\nRecovery reserves are not separately refundable deposits.\n\nSend to:\n' + destination + '?')) {
+  if (!confirm(review + '\n\nRecovery allocations are not separately refundable. They are not miner fees unless recovery transactions confirm. Refresh does not refund prior allocations.\n\nSend to:\n' + destination + '?')) {
     status('Estimate ready. No payment was sent.'); return;
   }
   status('Submitting once. If the connection fails, check history before trying again.');
