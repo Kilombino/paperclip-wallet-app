@@ -98,6 +98,27 @@ impl InputSelection {
 		InputScanner::new(self, candidates).candidates
 	}
 
+	/// Ordinary funded Ark sends cost two recovery transactions without change,
+	/// or three with change. Any multi-input send costs at least four. Compare
+	/// all eligible single inputs before falling back to bounded combinations.
+	/// Equal-cost inputs retain expiry order. This does not alter signed budgets.
+	pub(crate) fn select_ark_constructible(
+		&self, candidates: Vec<WalletVtxo>, mut validate: impl FnMut(&[WalletVtxo]) -> anyhow::Result<Option<Amount>>,
+	) -> anyhow::Result<(Vec<WalletVtxo>, Amount)> {
+		let candidates = self.eligible(candidates);
+		ensure!(self.max_inputs != Some(0), "No eligible Ark inputs; refresh or add Ark funds");
+		let mut best: Option<(WalletVtxo, Amount)> = None;
+		for input in &candidates {
+			if let Some(cost) = validate(slice::from_ref(input))? {
+				if best.as_ref().is_none_or(|(_, previous)| cost < *previous) {
+					best = Some((input.clone(), cost));
+				}
+			}
+		}
+		if let Some((input, cost)) = best { return Ok((vec![input], cost)); }
+		self.select_constructible(candidates, validate)
+	}
+
 	/// Prefer a constructible single input, then bounded multi-input candidates.
 	/// Validation must be read-only. A rejected shape returns None; operational errors propagate.
 	pub(crate) fn select_constructible<T>(
@@ -490,6 +511,33 @@ mod test {
 	}
 
 	#[test]
+	fn constructible_ark_reduces_fragmentation_and_accepts_exact_spend() {
+		let key = DummyTestVtxoSpec::default().user_keypair.public_key();
+		for (values, expected, cost) in [
+			(vec![14_000], vec![14_000], 4_000),
+			(vec![30_000, 14_000], vec![14_000], 4_000),
+			(vec![30_000, 40_000], vec![30_000], 6_000),
+			(vec![8_000, 8_000, 30_000], vec![30_000], 6_000),
+			(vec![15_000, 30_000], vec![30_000], 6_000),
+		] {
+			let inputs = values.iter().enumerate().map(|(i, v)| funded_input(*v, 1000 + i as u32)).collect::<Vec<_>>();
+			let (chosen, reserve) = InputSelection::new().select_ark_constructible(
+				inputs.iter().map(|(v, _)| v.clone()).collect(), |chosen| {
+				let full = chosen.iter().map(|v| inputs.iter().find(|(w, _)| w.id() == v.id()).unwrap().1.clone()).collect();
+				match ArkoorPackageBuilder::new_funded_payment(full, ArkoorDestination {
+					total_amount: Amount::from_sat(10_000), policy: VtxoPolicy::new_pubkey(key),
+				}, VtxoPolicy::new_pubkey(key)) {
+					Ok((_, reserve)) => Ok(Some(reserve)),
+					Err(ArkoorConstructionError::Dust | ArkoorConstructionError::Unbalanced { .. }) => Ok(None),
+					Err(error) => Err(error.into()),
+				}
+			}).unwrap();
+			assert_eq!(amounts(&chosen), expected);
+			assert_eq!(reserve.to_sat(), cost);
+		}
+	}
+
+	#[test]
 	fn constructible_selection_skips_fragmented_prefix() {
 		let candidates = vec![dummy_wallet_vtxo(45_800, 100),
 			dummy_wallet_vtxo(84_805, 200), dummy_wallet_vtxo(10_000, 200)];
@@ -509,6 +557,22 @@ mod test {
 			.exclude(excluded.id()).max_exit_depth(5).max_inputs(1);
 		let candidates = vec![expired, excluded, deep, dummy_wallet_vtxo(10_000, 400)];
 		let error = selection.select_constructible(candidates, |inputs| -> anyhow::Result<Option<()>> {
+			assert_eq!(amounts(inputs), [10_000]);
+			bail!("ancestry unavailable")
+		}).unwrap_err();
+		assert_eq!(error.to_string(), "ancestry unavailable");
+	}
+
+	#[test]
+	fn constructible_ark_selection_respects_filters_and_propagates_errors() {
+		let expired = dummy_wallet_vtxo(100_000, 10);
+		let excluded = dummy_wallet_vtxo(100_000, 200);
+		let mut deep = dummy_wallet_vtxo(100_000, 300);
+		deep.exit_depth = 5;
+		let selection = InputSelection::new().expires_after(BlockHeight::new(10))
+			.exclude(excluded.id()).max_exit_depth(5).max_inputs(1);
+		let candidates = vec![expired, excluded, deep, dummy_wallet_vtxo(10_000, 400)];
+		let error = selection.select_ark_constructible(candidates, |inputs| -> anyhow::Result<Option<Amount>> {
 			assert_eq!(amounts(inputs), [10_000]);
 			bail!("ancestry unavailable")
 		}).unwrap_err();

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Context;
 use bitcoin::{Amount, NetworkKind};
 use bitcoin::hex::DisplayHex;
@@ -6,7 +8,7 @@ use bitcoin_ext::BlockHeight;
 use log::{error, info, warn};
 
 use ark::{ProtocolEncoding, VtxoPolicy};
-use ark::arkoor::ArkoorDestination;
+use ark::arkoor::{ArkoorDestination, ArkoorConstructionError};
 use ark::arkoor::package::{ArkoorPackageBuilder, ArkoorPackageCosignResponse};
 use ark::vtxo::{Full, Vtxo, VtxoId};
 use server_rpc::{protos, ServerConnection};
@@ -374,46 +376,26 @@ impl Wallet {
 				.with_context(|| format!("the chosen VTXOs hold {}: spend them whole (amount {}) or leave \
 					a change of at least 1330 sats after 3 reserves per coin", total, total - minimum + amount));
 		}
-		{
-			// The default selection takes coins in its own order and can end up adding a
-			// coin for a few sats that would be dust. Then try paying from one coin alone,
-			// the smallest that is enough, before giving up with the original error.
-			let first = match self.select_arkoor_inputs(candidates.clone(), amount, reserve, tip).await {
-				Ok(inputs) => match self.check_arkoor_inputs(inputs, amount, policy.clone(), change, tip).await {
-					Ok(plan) => return Ok(plan),
-					Err(e) => e,
-				},
-				Err(e) => e,
-			};
-			let mut singles = candidates.into_iter()
-				.filter(|v| v.amount() >= amount + reserve * 2)
-				.collect::<Vec<_>>();
-			singles.sort_by_key(|v| v.amount());
-			for v in singles {
-				if let Ok(plan) = self.check_arkoor_inputs(vec![v], amount, policy.clone(), change, tip).await {
-					return Ok(plan);
-				}
-			}
-			Err(first)
-		}
-	}
-
-	async fn select_arkoor_inputs(
-		&self, candidates: Vec<WalletVtxo>, amount: Amount, reserve: Amount, tip: BlockHeight,
-	) -> anyhow::Result<Vec<WalletVtxo>> {
+		// Automatic selection: the cheapest constructible single coin, then bounded
+		// combinations, priced by the funded package itself.
 		let selection = self.spend_input_selection().await?.expires_after(tip);
-		let mut inputs = selection.select(candidates.clone(), amount)?;
-		loop {
-			let count = u64::try_from(inputs.len()).context("input count overflow")?;
-			let required = amount.checked_add(reserve.checked_mul(
-				count.checked_mul(3).context("recovery reserve overflow")?,
-			).context("recovery reserve overflow")?).context("payment amount overflow")?;
-			let selected = selection.select(candidates.clone(), required)?;
-			let same_count = selected.len() == inputs.len();
-			inputs = selected;
-			if same_count { break; }
-		}
-		Ok(inputs)
+		let candidates = selection.eligible(candidates);
+		let ids = candidates.iter().map(|v| v.id()).collect::<Vec<_>>();
+		let full = self.inner.db.get_full_vtxos(&ids).await?.into_iter()
+			.map(|v| (v.id(), v)).collect::<HashMap<_, _>>();
+		let (inputs, _) = selection.select_ark_constructible(candidates, |inputs| {
+			let hydrated = inputs.iter().map(|v| full.get(&v.id()).cloned()
+				.context("Missing Ark input ancestry")).collect::<anyhow::Result<Vec<_>>>()?;
+			match ArkoorPackageBuilder::new_funded_payment(hydrated,
+				ArkoorDestination { total_amount: amount, policy: policy.clone() },
+				VtxoPolicy::new_pubkey(change),
+			) {
+				Ok((_, reserve)) => Ok(Some(reserve)),
+				Err(ArkoorConstructionError::Dust | ArkoorConstructionError::Unbalanced { .. }) => Ok(None),
+				Err(error) => Err(error.into()),
+			}
+		})?;
+		self.check_arkoor_inputs(inputs, amount, policy, change, tip).await
 	}
 
 	async fn check_arkoor_inputs(

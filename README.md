@@ -144,3 +144,9 @@ generate wallet keys. No shared seed or platform seed is used.
 See [UPSTREAM.md](UPSTREAM.md) and the original MIT [LICENSE](LICENSE).
 Internal Bark crate and RPC names are retained for source compatibility.
 See [FUNDED-EXITS.md](FUNDED-EXITS.md) for recovery reserves and limitations.
+
+## Recovery costs
+
+See [recovery cost accounting and reduction work](docs/recovery-costs.md). Zero
+Ark transfer service fees do not mean zero total cost. Recovery allocations are
+not separately refundable and are not immediate miner fees.
