@@ -295,6 +295,11 @@ pub struct CreateOpts {
 	#[arg(long)]
 	pub birthday_height: Option<BlockHeight>,
 
+	/// Optional BIP-39 passphrase for the mnemonic. Empty means none. Embedders only:
+	/// a command-line flag would leave it in the shell history.
+	#[arg(skip)]
+	pub passphrase: String,
+
 	#[command(flatten)]
 	pub config: ConfigOpts,
 
@@ -465,7 +470,7 @@ async fn try_create_wallet(
 	// generate seed
 	let is_new_wallet = opts.mnemonic.is_none();
 	let mnemonic = opts.mnemonic.unwrap_or_else(|| bip39::Mnemonic::generate(12).expect("12 is valid"));
-	let seed = mnemonic.to_seed("");
+	let seed = mnemonic.to_seed(&opts.passphrase);
 
 	if opts.write_mnemonic_file {
 		fs_perms::create_new_owner_only(
@@ -504,7 +509,7 @@ async fn try_create_wallet(
 	// off — this only needs to create and recover.
 	BarkWallet::open(
 		net.as_bitcoin(),
-		WalletSeed::new_from_mnemonic(net.as_bitcoin(), &mnemonic),
+		WalletSeed::new_from_mnemonic_with_passphrase(net.as_bitcoin(), &mnemonic, &opts.passphrase),
 		config,
 		OpenWalletArgs {
 			persister: Some(db),
@@ -549,7 +554,7 @@ pub async fn open_wallet(datadir: &Path, user_agent: &str) -> anyhow::Result<Opt
 		.with_context(|| format!("failed to read mnemonic file at {}", mnemonic_path.display()))?;
 	let mnemonic = bip39::Mnemonic::from_str(&mnemonic_str).context("broken mnemonic")?;
 
-	open_wallet_inner(datadir, user_agent, mnemonic).await.map(Some)
+	open_wallet_inner(datadir, user_agent, mnemonic, "").await.map(Some)
 }
 
 /// Open the wallet in `datadir` with a mnemonic the caller holds, for wallets
@@ -560,20 +565,31 @@ pub async fn open_wallet_with_mnemonic(
 	user_agent: &str,
 	mnemonic: bip39::Mnemonic,
 ) -> anyhow::Result<Option<BarkWallet>> {
+	open_wallet_with_mnemonic_and_passphrase(datadir, user_agent, mnemonic, "").await
+}
+
+/// [open_wallet_with_mnemonic] for a mnemonic with a BIP-39 passphrase ("" for none).
+pub async fn open_wallet_with_mnemonic_and_passphrase(
+	datadir: &Path,
+	user_agent: &str,
+	mnemonic: bip39::Mnemonic,
+	passphrase: &str,
+) -> anyhow::Result<Option<BarkWallet>> {
 	let has_db = datadir.join(DB_FILE).exists() || datadir.join(FILESTORE_FILE).exists();
 	if !has_db {
 		return Ok(None);
 	}
 	fs_perms::warn_if_loose(datadir, 0o700);
-	open_wallet_inner(datadir, user_agent, mnemonic).await.map(Some)
+	open_wallet_inner(datadir, user_agent, mnemonic, passphrase).await.map(Some)
 }
 
 async fn open_wallet_inner(
 	datadir: &Path,
 	user_agent: &str,
 	mnemonic: bip39::Mnemonic,
+	passphrase: &str,
 ) -> anyhow::Result<BarkWallet> {
-	let seed = mnemonic.to_seed("");
+	let seed = mnemonic.to_seed(passphrase);
 
 	let use_filestore = datadir.join(FILESTORE_FILE).exists();
 	let db: Arc<dyn BarkPersister + Send + Sync> = if use_filestore {
@@ -602,7 +618,7 @@ async fn open_wallet_inner(
 	let lock_manager = open_lock_manager(datadir)?;
 	let bark_wallet = BarkWallet::open(
 		properties.network,
-		WalletSeed::new_from_mnemonic(properties.network, &mnemonic),
+		WalletSeed::new_from_mnemonic_with_passphrase(properties.network, &mnemonic, passphrase),
 		config,
 		OpenWalletArgs {
 			persister: Some(db),
@@ -641,6 +657,7 @@ mod test {
 			mutinynet: false,
 			mnemonic: None,
 			birthday_height: None,
+			passphrase: String::new(),
 			config: ConfigOpts::default(),
 			write_mnemonic_file: true,
 		}

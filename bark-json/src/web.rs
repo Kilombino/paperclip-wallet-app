@@ -267,6 +267,10 @@ pub struct CreateWalletRequest {
 	pub chain_source: Option<ChainSourceConfig>,
 	/// The optional mnemonic to use for the wallet
 	pub mnemonic: Option<String>,
+	/// Optional BIP-39 passphrase for the mnemonic. Only for embedders that keep the
+	/// words and passphrase themselves and supply them on every start; barkd rejects it.
+	#[serde(default)]
+	pub passphrase: Option<String>,
 	/// The network to use for the wallet
 	pub network: BarkNetwork,
 	/// An optional birthday height to start syncing the wallet from

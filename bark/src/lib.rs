@@ -705,7 +705,13 @@ impl WalletSeed {
 
 	/// Create a new [WalletSeed] from a given BIP-39 [Mnemonic]
 	pub fn new_from_mnemonic(network: Network, mnemonic: &Mnemonic) -> Self {
-		Self::new_from_seed(network, &mnemonic.to_seed(""))
+		Self::new_from_mnemonic_with_passphrase(network, mnemonic, "")
+	}
+
+	/// Create a new [WalletSeed] from a BIP-39 [Mnemonic] and its optional passphrase
+	/// ("" for none, which gives the same seed as [WalletSeed::new_from_mnemonic]).
+	pub fn new_from_mnemonic_with_passphrase(network: Network, mnemonic: &Mnemonic, passphrase: &str) -> Self {
+		Self::new_from_seed(network, &mnemonic.to_seed(passphrase))
 	}
 
 	pub fn fingerprint(&self) -> Fingerprint {
@@ -2570,6 +2576,26 @@ mod tests {
 		check_ark_info_safe, wrap_server_connect_error,
 		MAX_NB_ROUND_NONCES, MIN_MAINNET_VTXO_EXIT_DELTA, MISSING_SERVER_TRANSPORT_HELP,
 	};
+
+	#[test]
+	fn wallet_seed_passphrase() {
+		use std::str::FromStr;
+		use super::WalletSeed;
+		let m = bip39::Mnemonic::from_str(
+			"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+		).unwrap();
+		let plain = WalletSeed::new_from_mnemonic(Network::Bitcoin, &m);
+		// An empty passphrase is the same wallet as no passphrase, so existing wallets keep their keys.
+		assert_eq!(plain.fingerprint(), WalletSeed::new_from_mnemonic_with_passphrase(Network::Bitcoin, &m, "").fingerprint());
+		let with = WalletSeed::new_from_mnemonic_with_passphrase(Network::Bitcoin, &m, "TREZOR");
+		assert_ne!(plain.fingerprint(), with.fingerprint());
+		// BIP-39 vector: these words with "TREZOR" give this seed, so the same master key.
+		let seed = bitcoin::hex::FromHex::from_hex(
+			"c55257c360c07c72029aebc1b53c05ed0362ada38ead3e3e9efa3708e53495531f09a6987599d18264c1e1c92f2cf141630c7a3c4ab7c81b2f001698e7463b04",
+		).map(|v: Vec<u8>| v).unwrap();
+		let seed: [u8; 64] = seed.try_into().unwrap();
+		assert_eq!(with.fingerprint(), WalletSeed::new_from_seed(Network::Bitcoin, &seed).fingerprint());
+	}
 
 	#[test]
 	fn no_transport_connect_error_is_reworded_for_wallet_users() {

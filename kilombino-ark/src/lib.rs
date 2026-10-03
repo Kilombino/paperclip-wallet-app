@@ -12,7 +12,7 @@
 //! - the mnemonic never touches disk: the app keeps it encrypted by the Android Keystore
 //!   and hands it over in memory on every start and on wallet creation.
 //!
-//! JNI surface: `start(datadir, port, mnemonic) -> token` and `stop()`. Everything else is HTTP.
+//! JNI surface: `start(datadir, port, mnemonic, passphrase) -> token` and `stop()`. Everything else is HTTP.
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -23,7 +23,7 @@ use bitcoin::secp256k1::rand::{self, RngCore};
 use log::{info, warn};
 
 use bark_cli::connection;
-use bark_cli::wallet::{ConfigOpts, CreateOpts, create_wallet, open_wallet_with_mnemonic};
+use bark_cli::wallet::{ConfigOpts, CreateOpts, create_wallet, open_wallet_with_mnemonic_and_passphrase};
 use bark_json::web::{BarkNetwork, BitcoindAuth, ChainSourceConfig, CreateWalletRequest};
 use bark_rest::auth::AuthToken;
 use bark_rest::{Config, OnWalletCreate, OnWalletDelete, RestServer, ServerState};
@@ -62,6 +62,7 @@ fn create_opts(req: CreateWalletRequest) -> anyhow::Result<CreateOpts> {
 	// wallet is ever created with a seed only the datadir knows.
 	let words = req.mnemonic.context("the app must supply the mnemonic")?;
 	let mnemonic = Some(bip39::Mnemonic::from_str(&words).context("invalid mnemonic")?);
+	let passphrase = req.passphrase.unwrap_or_default();
 	#[allow(deprecated)]
 	let mut config = ConfigOpts {
 		ark: req.ark_server,
@@ -97,15 +98,16 @@ fn create_opts(req: CreateWalletRequest) -> anyhow::Result<CreateOpts> {
 		mutinynet: req.network == BarkNetwork::Mutinynet,
 		mnemonic,
 		birthday_height: req.birthday_height.map(Into::into),
+		passphrase,
 		config,
 		write_mnemonic_file: false,
 	})
 }
 
 /// Starts the wallet daemon and its REST API. Returns the bearer token to use.
-/// `mnemonic` is `None` while the app has no Ark wallet yet.
-/// Starting twice returns an error rather than a second daemon.
-pub fn start(datadir: &Path, port: u16, mnemonic: Option<&str>) -> anyhow::Result<String> {
+/// `mnemonic` is `None` while the app has no Ark wallet yet; `passphrase` is its optional
+/// BIP-39 passphrase ("" for none). Starting twice returns an error rather than a second daemon.
+pub fn start(datadir: &Path, port: u16, mnemonic: Option<&str>, passphrase: &str) -> anyhow::Result<String> {
 	let mut running = RUNNING.lock().unwrap();
 	anyhow::ensure!(running.is_none(), "already running");
 
@@ -127,12 +129,13 @@ pub fn start(datadir: &Path, port: u16, mnemonic: Option<&str>) -> anyhow::Resul
 	};
 
 	let datadir = datadir.to_path_buf();
+	let passphrase = passphrase.to_owned();
 	let r = runtime().block_on(async move {
 		let lock = connection::acquire_barkd_lock(&datadir)?;
 		let shutdown = CancellationToken::new();
 
 		let wallet = match mnemonic {
-			Some(m) => open_wallet_with_mnemonic(&datadir, USER_AGENT, m).await?,
+			Some(m) => open_wallet_with_mnemonic_and_passphrase(&datadir, USER_AGENT, m, &passphrase).await?,
 			None => None,
 		};
 		if let Some(w) = &wallet {
@@ -149,8 +152,9 @@ pub fn start(datadir: &Path, port: u16, mnemonic: Option<&str>) -> anyhow::Resul
 				Box::pin(async move {
 					let opts = create_opts(req)?;
 					let mnemonic = opts.mnemonic.clone().expect("checked in create_opts");
+					let passphrase = opts.passphrase.clone();
 					create_wallet(&datadir, USER_AGENT, opts).await?;
-					let wallet = open_wallet_with_mnemonic(&datadir, USER_AGENT, mnemonic).await?
+					let wallet = open_wallet_with_mnemonic_and_passphrase(&datadir, USER_AGENT, mnemonic, &passphrase).await?
 						.context("wallet just created")?;
 					if let Err(e) = wallet.refresh_server().await {
 						warn!("Ark server handshake failed on wallet creation: {:#}", e);
@@ -209,22 +213,28 @@ mod jni_api {
 	use jni::objects::{JClass, JString};
 	use jni::sys::{jint, jstring};
 
-	/// `ArkNative.start(datadir, port, mnemonic)`: the bearer token, or "ERR:<message>".
-	/// `mnemonic` is null while the app has no Ark wallet yet.
+	/// `ArkNative.start(datadir, port, mnemonic, passphrase)`: the bearer token, or
+	/// "ERR:<message>". `mnemonic` is null while the app has no Ark wallet yet;
+	/// `passphrase` is "" (or null) for none.
 	#[unsafe(no_mangle)]
 	pub extern "system" fn Java_com_kilombino_pyblockwatch_ark_ArkNative_start<'l>(
 		mut env: JNIEnv<'l>, _class: JClass<'l>, datadir: JString<'l>, port: jint,
-		mnemonic: JString<'l>,
+		mnemonic: JString<'l>, passphrase: JString<'l>,
 	) -> jstring {
 		let words: Option<String> = if mnemonic.is_null() {
 			None
 		} else {
 			env.get_string(&mnemonic).ok().map(Into::into)
 		};
+		let passphrase: String = if passphrase.is_null() {
+			String::new()
+		} else {
+			env.get_string(&passphrase).map(Into::into).unwrap_or_default()
+		};
 		let out = match env.get_string(&datadir) {
 			Ok(d) => {
 				let d: String = d.into();
-				match start(&PathBuf::from(d), port as u16, words.as_deref()) {
+				match start(&PathBuf::from(d), port as u16, words.as_deref(), &passphrase) {
 					Ok(token) => token,
 					Err(e) => format!("ERR:{:#}", e),
 				}

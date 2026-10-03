@@ -315,6 +315,9 @@ fn generate_store_auth_token(datadir: &PathBuf) -> anyhow::Result<AuthToken> {
 }
 
 fn wallet_create_request_to_create_opts(req: CreateWalletRequest) -> anyhow::Result<CreateOpts> {
+	if req.passphrase.as_deref().is_some_and(|p| !p.is_empty()) {
+		anyhow::bail!("barkd does not support a mnemonic passphrase");
+	}
 	let mnemonic = if let Some(mnemonic) = req.mnemonic {
 		Some(bip39::Mnemonic::from_str(&mnemonic).badarg("Invalid mnemonic")?)
 	} else {
@@ -363,6 +366,8 @@ fn wallet_create_request_to_create_opts(req: CreateWalletRequest) -> anyhow::Res
 		mutinynet: req.network == BarkNetwork::Mutinynet,
 		mnemonic: mnemonic,
 		birthday_height: req.birthday_height.map(Into::into),
+		// barkd reopens from its mnemonic file, which has no passphrase.
+		passphrase: String::new(),
 		config: config,
 		write_mnemonic_file: true,
 	})
