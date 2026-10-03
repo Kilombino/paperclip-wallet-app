@@ -16,7 +16,9 @@ This example describes Paperclip pricing, not a protocol-wide fixed service fee.
 
 ## Reduction work
 
-First prefer a valid single input over fragmented inputs. Use the actual package
+First prefer a valid single input over fragmented inputs. Compare all valid single
+inputs and prefer an exact spend with a 4,000-sat allocation over a change-producing
+spend with a 6,000-sat allocation. Equal-cost inputs retain expiry order. Use the actual package
 builder for both estimates and sends, including exact one-output spends. Retain
 all admission, expiry, dust, and final-claim checks. This reduces avoidable costs;
 it does not lower the 4,000-sat minimum of the current signed profile.

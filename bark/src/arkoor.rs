@@ -345,7 +345,7 @@ impl Wallet {
 		let ids = candidates.iter().map(|v| v.id()).collect::<Vec<_>>();
 		let full = self.inner.db.get_full_vtxos(&ids).await?.into_iter()
 			.map(|v| (v.id(), v)).collect::<HashMap<_, _>>();
-		let (inputs, recovery_reserve) = selection.select_constructible(candidates, |inputs| {
+		let (inputs, recovery_reserve) = selection.select_ark_constructible(candidates, |inputs| {
 			let hydrated = inputs.iter().map(|v| full.get(&v.id()).cloned()
 				.context("Missing Ark input ancestry")).collect::<anyhow::Result<Vec<_>>>()?;
 			match ArkoorPackageBuilder::new_funded_payment(hydrated,
