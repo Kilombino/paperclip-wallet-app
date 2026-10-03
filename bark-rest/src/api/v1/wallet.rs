@@ -735,8 +735,9 @@ pub async fn send(
 			wallet.validate_arkoor_address(&addr).await
 				.badarg("invalid arkoor address")?;
 			log::info!("Sending arkoor payment of {} to address {}", amount, addr);
-			wallet.send_arkoor_payment_with_max_cost(
-				&addr, amount, body.max_total_sat.map(Amount::from_sat),
+			let chosen = body.vtxos.as_deref().map(parse_vtxo_ids).transpose()?;
+			wallet.send_arkoor_payment_from(
+				&addr, amount, body.max_total_sat.map(Amount::from_sat), chosen,
 			).await?;
 			return Ok(axum::Json(bark_json::web::SendResponse {
 				message: "Payment sent successfully".to_string(),
@@ -750,6 +751,7 @@ pub async fn send(
 	};
 
 	if body.max_total_sat.is_some() { badarg!("max_total_sat is supported for Ark sends only"); }
+	if body.vtxos.is_some() { badarg!("vtxos (coin control) is supported for Ark sends only"); }
 
 	let invoice = if let Ok(inv) = Bolt11Invoice::from_str(&body.destination) {
 		if body.comment.is_some() {
@@ -1250,4 +1252,14 @@ pub async fn import_vtxo(
 	}
 
 	Ok(axum::Json(imported))
+}
+
+/// Parse VTXO ids sent by a client for coin control.
+pub(crate) fn parse_vtxo_ids(ids: &[String]) -> crate::error::HandlerResult<Vec<ark::VtxoId>> {
+	if ids.is_empty() { badarg!("No VTXO IDs provided"); }
+	let mut out = Vec::with_capacity(ids.len());
+	for s in ids {
+		out.push(ark::VtxoId::from_str(s).badarg("Invalid VTXO id")?);
+	}
+	Ok(out)
 }

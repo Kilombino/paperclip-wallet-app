@@ -251,6 +251,7 @@ pub(crate) async fn start_arkoor_send(
 	destination: ark::Address,
 	amount: Amount,
 	max_total: Option<Amount>,
+	chosen: Option<Vec<VtxoId>>,
 ) -> anyhow::Result<ArkoorSend> {
 	wallet.inner.chain.require_funded_policy().await?;
 	let _ = wallet.require_server().await?;
@@ -263,7 +264,7 @@ pub(crate) async fn start_arkoor_send(
 		bail!("Cannot create arkoor to same address as change");
 	}
 	let (inputs, recovery_reserve) = wallet.plan_arkoor_payment(
-		amount, destination.policy().clone(), change_keypair.public_key(),
+		amount, destination.policy().clone(), change_keypair.public_key(), chosen.as_deref(),
 	).await?;
 	check_send_cost(amount, recovery_reserve, max_total)?;
 	let input_vtxo_ids = inputs.iter().map(|v| v.id()).collect::<Vec<_>>();

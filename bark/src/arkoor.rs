@@ -2,6 +2,7 @@ use anyhow::Context;
 use bitcoin::{Amount, NetworkKind};
 use bitcoin::hex::DisplayHex;
 use bitcoin::secp256k1::{Keypair, PublicKey};
+use bitcoin_ext::BlockHeight;
 use log::{error, info, warn};
 
 use ark::{ProtocolEncoding, VtxoPolicy};
@@ -318,7 +319,16 @@ impl Wallet {
 	pub async fn send_arkoor_payment_with_max_cost(
 		&self, destination: &ark::Address, amount: Amount, max_total: Option<Amount>,
 	) -> anyhow::Result<()> {
-		let action = start_arkoor_send(self, destination.clone(), amount, max_total).await?;
+		self.send_arkoor_payment_from(destination, amount, max_total, None).await
+	}
+
+	/// Send spending exactly the VTXOs in `inputs` (coin control), or let the wallet choose
+	/// when it is `None`.
+	pub async fn send_arkoor_payment_from(
+		&self, destination: &ark::Address, amount: Amount, max_total: Option<Amount>,
+		inputs: Option<Vec<VtxoId>>,
+	) -> anyhow::Result<()> {
+		let action = start_arkoor_send(self, destination.clone(), amount, max_total, inputs).await?;
 
 		// Persist the action together with the input locks so the executor has
 		// something to drive on restart; otherwise a crash between this point and
@@ -331,16 +341,44 @@ impl Wallet {
 
 	/// Read-only plan shared by estimates and sends. No keys, locks or signatures are created.
 	pub(crate) async fn plan_arkoor_payment(
-		&self, amount: Amount, policy: VtxoPolicy, change: PublicKey,
+		&self, amount: Amount, policy: VtxoPolicy, change: PublicKey, chosen: Option<&[VtxoId]>,
 	) -> anyhow::Result<(Vec<WalletVtxo>, Amount)> {
 		self.inner.chain.require_funded_policy().await?;
 		let _ = self.require_server().await?;
 		ensure!(amount > Amount::ZERO, "payment amount must be positive");
 		let tip = self.inner.chain.tip().await?;
 		let candidates = self.spendable_vtxos().await?;
+		let reserve = ark::exit_policy::paperclip_funding().per_transaction();
+		let inputs = if let Some(chosen) = chosen {
+			// Coin control: spend exactly these, all of them, or refuse.
+			ensure!(!chosen.is_empty(), "no VTXOs chosen");
+			let mut inputs = Vec::with_capacity(chosen.len());
+			for id in chosen {
+				ensure!(!inputs.iter().any(|v: &WalletVtxo| v.id() == *id), "VTXO {} chosen twice", id);
+				let v = candidates.iter().find(|v| v.id() == *id)
+					.with_context(|| format!("VTXO {} is not spendable", id))?;
+				inputs.push(v.clone());
+			}
+			let count = u64::try_from(inputs.len()).context("input count overflow")?;
+			let required = amount.checked_add(reserve.checked_mul(
+				count.checked_mul(3).context("recovery reserve overflow")?,
+			).context("recovery reserve overflow")?).context("payment amount overflow")?;
+			let total = inputs.iter().map(|v| v.amount()).sum::<Amount>();
+			ensure!(total >= required,
+				"the chosen VTXOs hold {} but this payment needs {} (amount plus {} recovery reserve)",
+				total, required, required - amount);
+			inputs
+		} else {
+			self.select_arkoor_inputs(candidates, amount, reserve, tip).await?
+		};
+		self.check_arkoor_inputs(inputs, amount, policy, change, tip).await
+	}
+
+	async fn select_arkoor_inputs(
+		&self, candidates: Vec<WalletVtxo>, amount: Amount, reserve: Amount, tip: BlockHeight,
+	) -> anyhow::Result<Vec<WalletVtxo>> {
 		let selection = self.spend_input_selection().await?.expires_after(tip);
 		let mut inputs = selection.select(candidates.clone(), amount)?;
-		let reserve = ark::exit_policy::paperclip_funding().per_transaction();
 		loop {
 			let count = u64::try_from(inputs.len()).context("input count overflow")?;
 			let required = amount.checked_add(reserve.checked_mul(
@@ -351,6 +389,13 @@ impl Wallet {
 			inputs = selected;
 			if same_count { break; }
 		}
+		Ok(inputs)
+	}
+
+	async fn check_arkoor_inputs(
+		&self, inputs: Vec<WalletVtxo>, amount: Amount, policy: VtxoPolicy, change: PublicKey,
+		tip: BlockHeight,
+	) -> anyhow::Result<(Vec<WalletVtxo>, Amount)> {
 		let ids = inputs.iter().map(|v| v.id()).collect::<Vec<_>>();
 		let full = self.inner.db.get_full_vtxos(&ids).await?;
 		for input in &full {

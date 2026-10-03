@@ -380,8 +380,10 @@ pub async fn ark_send_fee(
 	if body.amount_sat == 0 { badarg!("amount must be positive"); }
 	let destination = ark::Address::from_str(&body.destination).badarg("invalid Ark address")?;
 	wallet.validate_arkoor_address(&destination).await.badarg("invalid Ark destination")?;
-	let estimate = wallet.estimate_arkoor_send(&destination, Amount::from_sat(body.amount_sat)).await
-		.context("Cannot estimate Ark send")?;
+	let chosen = body.vtxos.as_deref().map(super::wallet::parse_vtxo_ids).transpose()?;
+	let estimate = wallet.estimate_arkoor_send_from(
+		&destination, Amount::from_sat(body.amount_sat), chosen.as_deref(),
+	).await.context("Cannot estimate Ark send")?;
 	let remaining = wallet.balance().await?.spendable.checked_sub(estimate.gross_amount)
 		.context("wallet balance changed; request a new estimate")?;
 	Ok(Json(bark_json::web::ArkSendEstimateResponse {

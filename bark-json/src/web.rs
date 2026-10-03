@@ -141,6 +141,9 @@ impl From<bark::FeeEstimate> for FeeEstimateResponse {
 pub struct ArkSendEstimateRequest {
 	pub destination: String,
 	pub amount_sat: u64,
+	/// Coin control: spend exactly these VTXOs. Omit to let the wallet choose.
+	#[serde(default)]
+	pub vtxos: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -475,6 +478,9 @@ pub struct SendRequest {
 	pub amount_sat: Option<u64>,
 	/// An optional comment, only supported when paying to lightning addresses
 	pub comment: Option<String>,
+	/// Coin control for Ark addresses: spend exactly these VTXOs. Omit to let the wallet choose.
+	#[serde(default)]
+	pub vtxos: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize)]
