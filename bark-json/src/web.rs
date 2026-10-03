@@ -465,6 +465,19 @@ pub struct BoardRequest {
 	/// this value, with any server-configured [BoardFees](crate::cli::fees::BoardFees) deducted, must be
 	/// >= [P2TR_DUST](bitcoin_ext::P2TR_DUST).
 	pub amount_sat: u64,
+	/// Optional fee rate for the funding transaction, in sat/vB (fractions allowed). When
+	/// omitted, the wallet's regular fee estimate is used.
+	#[serde(default)]
+	pub fee_rate_sat_per_vb: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "utoipa", derive(ToSchema))]
+pub struct BoardAllRequest {
+	/// Optional fee rate for the funding transaction, in sat/vB (fractions allowed). When
+	/// omitted, the wallet's regular fee estimate is used.
+	#[serde(default)]
+	pub fee_rate_sat_per_vb: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]

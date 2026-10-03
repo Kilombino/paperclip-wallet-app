@@ -1,7 +1,7 @@
 use anyhow::Context;
 use bdk_esplora::esplora_client::Amount;
 use bitcoin::key::Keypair;
-use bitcoin::{Address, OutPoint, Psbt};
+use bitcoin::{Address, FeeRate, OutPoint, Psbt};
 use log::{info, warn};
 
 use ark::board::BoardBuilder;
@@ -24,16 +24,30 @@ impl Wallet {
 	///
 	/// Returns an error if no onchain wallet is configured.
 	pub async fn board_amount(&self, amount: Amount) -> anyhow::Result<PendingBoard> {
+		self.board_amount_with_fee_rate(amount, None).await
+	}
+
+	/// Like [Wallet::board_amount], paying the funding transaction at `fee_rate`, or at the
+	/// regular estimate when it is `None`.
+	pub async fn board_amount_with_fee_rate(
+		&self, amount: Amount, fee_rate: Option<FeeRate>,
+	) -> anyhow::Result<PendingBoard> {
 		let (user_keypair, _) = self.derive_store_next_keypair().await?;
-		self.board(Some(amount), user_keypair).await
+		self.board(Some(amount), user_keypair, fee_rate).await
 	}
 
 	/// Board a [ark::Vtxo] with all the funds in your onchain wallet.
 	///
 	/// Returns an error if no onchain wallet is configured.
 	pub async fn board_all(&self) -> anyhow::Result<PendingBoard> {
+		self.board_all_with_fee_rate(None).await
+	}
+
+	/// Like [Wallet::board_all], paying the funding transaction at `fee_rate`, or at the
+	/// regular estimate when it is `None`.
+	pub async fn board_all_with_fee_rate(&self, fee_rate: Option<FeeRate>) -> anyhow::Result<PendingBoard> {
 		let (user_keypair, _) = self.derive_store_next_keypair().await?;
-		self.board(None, user_keypair).await
+		self.board(None, user_keypair, fee_rate).await
 	}
 
 	pub async fn pending_boards(&self) -> anyhow::Result<Vec<PendingBoard>> {
@@ -118,12 +132,16 @@ impl Wallet {
 		&self,
 		amount: Option<Amount>,
 		user_keypair: Keypair,
+		fee_rate: Option<FeeRate>,
 	) -> anyhow::Result<PendingBoard> {
 		let onchain = self.inner.onchain.as_ref()
 			.ok_or_else(|| anyhow!("no onchain wallet configured; cannot board"))?;
 
 		let (addr, expiry_height) = self.board_funding_address(&user_keypair).await?;
-		let fee_rate = self.inner.chain.fee_rates().await.regular;
+		let fee_rate = match fee_rate {
+			Some(rate) => rate,
+			None => self.inner.chain.fee_rates().await.regular,
+		};
 
 		let signed_psbt = {
 			let mut wallet = onchain.write().await;
