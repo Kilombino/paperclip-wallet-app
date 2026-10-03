@@ -349,7 +349,7 @@ impl Wallet {
 		let tip = self.inner.chain.tip().await?;
 		let candidates = self.spendable_vtxos().await?;
 		let reserve = ark::exit_policy::paperclip_funding().per_transaction();
-		let inputs = if let Some(chosen) = chosen {
+		if let Some(chosen) = chosen {
 			// Coin control: spend exactly these, all of them, or refuse.
 			ensure!(!chosen.is_empty(), "no VTXOs chosen");
 			let mut inputs = Vec::with_capacity(chosen.len());
@@ -359,16 +359,22 @@ impl Wallet {
 					.with_context(|| format!("VTXO {} is not spendable", id))?;
 				inputs.push(v.clone());
 			}
+			// The funded package decides exactly: a coin spent whole pays 2 reserves, one
+			// with change pays 3 and must leave a non-dust change. Below the whole-coin
+			// minimum it can never work, so say so plainly; otherwise let it decide.
 			let count = u64::try_from(inputs.len()).context("input count overflow")?;
-			let required = amount.checked_add(reserve.checked_mul(
-				count.checked_mul(3).context("recovery reserve overflow")?,
+			let minimum = amount.checked_add(reserve.checked_mul(
+				count.checked_mul(2).context("recovery reserve overflow")?,
 			).context("recovery reserve overflow")?).context("payment amount overflow")?;
 			let total = inputs.iter().map(|v| v.amount()).sum::<Amount>();
-			ensure!(total >= required,
-				"the chosen VTXOs hold {} but this payment needs {} (amount plus {} recovery reserve)",
-				total, required, required - amount);
-			inputs
-		} else {
+			ensure!(total >= minimum,
+				"the chosen VTXOs hold {} but this payment needs at least {} (amount plus {} recovery reserve)",
+				total, minimum, minimum - amount);
+			return self.check_arkoor_inputs(inputs, amount, policy, change, tip).await
+				.with_context(|| format!("the chosen VTXOs hold {}: spend them whole (amount {}) or leave \
+					a change of at least 1330 sats after 3 reserves per coin", total, total - minimum + amount));
+		}
+		{
 			// The default selection takes coins in its own order and can end up adding a
 			// coin for a few sats that would be dust. Then try paying from one coin alone,
 			// the smallest that is enough, before giving up with the original error.
@@ -388,9 +394,8 @@ impl Wallet {
 					return Ok(plan);
 				}
 			}
-			return Err(first);
-		};
-		self.check_arkoor_inputs(inputs, amount, policy, change, tip).await
+			Err(first)
+		}
 	}
 
 	async fn select_arkoor_inputs(
