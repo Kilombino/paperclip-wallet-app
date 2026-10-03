@@ -1,7 +1,7 @@
 # Funded recovery profile 2
 
 This is the experimental funded recovery profile used by the Paperclip public beta.
-Regtest is the default. Mainnet opt-in and its prerequisites are in MAINNET.md.
+Regtest is the default. Mainnet opt-in and its prerequisites are in the [ASP mainnet guide](https://github.com/connorslab/paperclip-asp/blob/main/MAINNET.md).
 
 The wallet requires `ArkInfo.exit_profile = 2`. A board request includes the
 same marker. Transfer requests include explicit recovery reserves. The wallet
@@ -77,10 +77,10 @@ and ordinary version-2 relay rules, including `mempooltruc=reject`. The test run
 new positions when reported relay, mempool, or dust fees exceed the tested
 envelope. Recovery of existing positions remains available separately.
 
-Unified ALL signatures remain mandatory. Mainnet requires a separate explicit opt-in; see MAINNET.md.
+Unified ALL signatures remain mandatory. Mainnet requires a separate explicit opt-in; see the [ASP mainnet guide](https://github.com/connorslab/paperclip-asp/blob/main/MAINNET.md).
 Funded Lightning HTLCs and server liquidity-pool allocation require explicit
 `experimental_funded_lightning` opt-in and a compatible CLN backend. They are
-supported by the current server. See `LIGHTNING.md` for activation and tested
+supported by the current server. See [ASP Lightning support](https://github.com/connorslab/paperclip-asp/blob/main/LIGHTNING.md) for activation and tested
 limits. Historical ordinary-balance test fixtures use an empty VTXO pool.
 
 See the companion ASP's `scripts/test-default-policy.sh` and validation report
