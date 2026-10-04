@@ -26,12 +26,12 @@ jobs:
           key: ${{ runner.os }}-lnfix-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.sha }}
           restore-keys: ${{ runner.os }}-lnfix-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
       - run: sha256sum -c SHARED-SOURCE.sha256
-      - run: nix develop --command cargo check --locked -p bark-wallet -p bark-json -p bark-rest --tests --features onchain-bdk
-      - run: nix develop --command just unit-wallet lightning
-      - run: nix develop --command just unit funded_lightning
-      - run: nix develop --command just unit lightning_send_lifetime
+      - run: nix develop .#build --command cargo check --locked -p bark-wallet -p bark-json -p bark-rest --tests --features onchain-bdk
+      - run: nix develop .#build --command just unit-wallet lightning
+      - run: nix develop .#build --command just unit funded_lightning
+      - run: nix develop .#build --command just unit lightning_send_lifetime
       - name: Generate API documentation
-        run: nix develop --command cargo run --locked -p bark-rest --example dump_api_docs > bark-rest/openapi.json
+        run: nix develop .#build --command cargo run --locked -p bark-rest --example dump_api_docs > bark-rest/openapi.json
       - uses: actions/upload-artifact@v4
         with:
           name: openapi
