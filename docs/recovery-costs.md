@@ -59,9 +59,9 @@ Show recipient amount, service fee, recovery allocation, total debit and net
 received before confirmation. Never label the whole allocation a miner fee or
 promise a separate refund. Historical test reports are not current fee quotes.
 
-## Candidate: failed Lightning sends
+## Failed Lightning sends
 
-The `fix/lightning-failed-payment-costs` branch is not a deployed release.
+Available with Wallet 0.8.3 beta and the Paperclip ASP update deployed October 4, 2026.
 Updated wallets send invoice and amount preflight before the ASP signs the HTLC.
 Expired or nearly expired invoices are rejected. Public BOLT11 invoices without
 route hints also receive a route check within the existing safe delay and fee
