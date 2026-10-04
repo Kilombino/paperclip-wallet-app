@@ -788,6 +788,48 @@ mod test {
 	}
 
 	#[test]
+	fn funded_lightning_reimbursement_restores_failed_send_balance() {
+		let (funding, input) = funded_test_input(Amount::from_sat(100_000));
+		let preimage = crate::lightning::Preimage::random();
+		let user = VtxoPolicy::new_pubkey(alice_public_key());
+		let destination = ArkoorDestination {
+			total_amount: Amount::from_sat(50_475),
+			policy: VtxoPolicy::new_server_htlc_send(alice_public_key(),
+				preimage.compute_payment_hash(), BlockHeight::new(400)),
+		};
+		let (send, setup_cost) = ArkoorPackageBuilder::new_funded_lightning_send(
+			vec![input], destination, user.clone(),
+		).unwrap();
+		assert_eq!(setup_cost.to_sat(), 6000);
+		let outputs = send.cosign_both(&[alice_keypair()], &server_keypair())
+			.unwrap().build_signed_vtxos();
+		let (htlcs, change): (Vec<_>, Vec<_>) = outputs.into_iter()
+			.partition(|v| matches!(v.policy(), VtxoPolicy::ServerHtlcSend(_)));
+		let (refund, claim_cost) = ArkoorPackageBuilder::new_funded_lightning_claim(
+			htlcs, user.clone(),
+		).unwrap();
+		assert_eq!(claim_cost.to_sat(), 4000);
+		let refund = refund.cosign_both(&[alice_keypair()], &server_keypair())
+			.unwrap().build_signed_vtxos();
+		let (pool_funding, pool_input) = funded_test_input(Amount::from_sat(200_000));
+		let (grant, operator_cost) = ArkoorPackageBuilder::new_funded_payment(
+			vec![pool_input], ArkoorDestination { total_amount: setup_cost + claim_cost, policy: user },
+			VtxoPolicy::new_pubkey(server_keypair().public_key()),
+		).unwrap();
+		let grants = grant.cosign_both(&[alice_keypair()], &server_keypair())
+			.unwrap().build_signed_vtxos();
+		let grants = grants.into_iter().filter(|v| v.policy().user_pubkey() == alice_public_key())
+			.collect::<Vec<_>>();
+		assert_eq!(operator_cost.to_sat(), 6000);
+		assert_eq!(grants.iter().map(|v| v.amount()).sum::<Amount>(), setup_cost + claim_cost);
+		let restored = change.iter().chain(&refund).chain(&grants).map(|v| v.amount()).sum::<Amount>();
+		assert_eq!(restored.to_sat(), 100_000);
+		let policy = crate::exit_policy::paperclip_policy();
+		for v in &refund { policy.check(v, &funding, BlockHeight::new(100)).unwrap(); }
+		for v in &grants { policy.check(v, &pool_funding, BlockHeight::new(100)).unwrap(); }
+	}
+
+	#[test]
 	fn funded_lightning_multi_input_preserves_payment_and_refund_reserves() {
 		let (_, first) = funded_test_input(Amount::from_sat(100_000));
 		let (_, second) = funded_test_input(Amount::from_sat(80_000));

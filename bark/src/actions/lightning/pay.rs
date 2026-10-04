@@ -242,7 +242,9 @@ impl WalletAction for LightningSend {
 
 	async fn on_rejection(self, wallet: &Wallet, error: AdvanceError) -> anyhow::Result<Advance<Self>> {
 		match self.progress.clone() {
-			Progress::AwaitingReimbursement { .. } => {},
+			Progress::AwaitingReimbursement { .. } => Ok(Advance::Park {
+				state: self, wake_after: Some(Duration::from_secs(30)), error: Some(error),
+			}),
 			// Nothing committed server-side: drop the locks and the row
 			// ourselves, then bail. We can't rely on the executor's
 			// `Advance::Done` path because we want the original error
@@ -793,8 +795,6 @@ pub(crate) async fn revoke_lightning_send_htlcs(
 			.fee(effective.unsigned_abs())
 			.produced_vtxos(&vtxos),
 	).await.context("failed to update movement")?;
-	wallet.store_spendable_vtxos(&vtxos).await?;
-	wallet.mark_vtxos_as_spent(&htlc_vtxos).await?;
 
 	Ok(true)
 }

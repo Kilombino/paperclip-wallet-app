@@ -11,11 +11,20 @@ jobs:
     timeout-minutes: 90
     env:
       CARGO_BUILD_JOBS: 2
+      CARGO_INCREMENTAL: 0
       CARGO_PROFILE_TEST_DEBUG: 0
       CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-lnfix-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-lnfix-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
       - run: sha256sum -c SHARED-SOURCE.sha256
       - run: nix develop --command cargo check --locked -p bark-wallet -p bark-json -p bark-rest --tests --features onchain-bdk
       - run: nix develop --command just unit-wallet lightning
@@ -27,3 +36,11 @@ jobs:
         with:
           name: openapi
           path: bark-rest/openapi.json
+      - uses: actions/cache/save@v4
+        if: always() && !cancelled()
+        with:
+          path: |
+            target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-lnfix-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.sha }}
