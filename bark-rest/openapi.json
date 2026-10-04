@@ -857,6 +857,58 @@
         "deprecated": true
       }
     },
+    "/api/v1/fees/ark/send": {
+      "post": {
+        "tags": [
+          "fees"
+        ],
+        "summary": "Estimate the full Ark-send cost without sending",
+        "description": "Read-only preview. Does not lock inputs, allocate keys, sign or send. Recovery reserves reduce spendable funds and are not separately refundable deposits. Insufficient funds, dust and refresh requirements return an error, never a zero-cost quote. Send total_debit_sat as max_total_sat to wallet/send to cap the approved debit. Estimates do not reserve funds.",
+        "operationId": "ark_send_fee",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArkSendEstimateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Current input selection and full debit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArkSendEstimateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid destination or amount",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Cannot construct payment; inspect error details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/fees/board": {
       "get": {
         "tags": [
@@ -1345,13 +1397,58 @@
         }
       }
     },
+    "/api/v1/lightning/offers": {
+      "get": {
+        "tags": [
+          "lightning"
+        ],
+        "operationId": "get_offer",
+        "responses": {
+          "200": {
+            "description": "Current reusable offer or null"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "lightning"
+        ],
+        "operationId": "create_offer",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LightningOfferRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Reusable wallet-owned offer"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "lightning"
+        ],
+        "operationId": "disable_offer",
+        "responses": {
+          "200": {
+            "description": "Offer disabled; issued invoices remain tracked"
+          }
+        }
+      }
+    },
     "/api/v1/lightning/pay": {
       "post": {
         "tags": [
           "lightning"
         ],
         "summary": "Send a Lightning payment",
-        "description": "Sends a payment to a Lightning destination. Accepts a BOLT11 invoice, BOLT12 offer, or Lightning address. The `amount_sat` field is required for Lightning addresses but optional for invoices and offers. Comments are only supported for Lightning addresses.",
+        "description": "Sends a payment to a Lightning destination. Accepts a BOLT11 or BOLT12 invoice, BOLT12 offer, or Lightning address. The `amount_sat` field is required for Lightning addresses but optional for invoices and offers. Comments are only supported for Lightning addresses.",
         "operationId": "pay",
         "requestBody": {
           "content": {
@@ -1375,7 +1472,7 @@
             }
           },
           "400": {
-            "description": "The provided destination is not a valid BOLT11 invoice, BOLT12 offer, or Lightning address",
+            "description": "The provided destination is not a valid BOLT11 or BOLT12 invoice, BOLT12 offer, or Lightning address",
             "content": {
               "application/json": {
                 "schema": {
@@ -1985,6 +2082,68 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/onchain/message/sign": {
+      "post": {
+        "tags": [
+          "onchain"
+        ],
+        "summary": "Sign an on-chain Taproot address ownership message using BIP322-simple",
+        "operationId": "onchain_message_sign",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnchainMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnchainMessageProof"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/onchain/message/verify": {
+      "post": {
+        "tags": [
+          "onchain"
+        ],
+        "summary": "Verify a BIP322-simple Taproot address ownership message",
+        "operationId": "onchain_message_verify",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnchainMessageVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnchainMessageVerification"
                 }
               }
             }
@@ -3096,7 +3255,7 @@
           "wallet"
         ],
         "summary": "Send a payment",
-        "description": "Sends an Ark or Lightning payment to the specified destination. Accepts an Ark address, BOLT11 invoice, BOLT12 offer, or Lightning address. Ark address payments are settled instantly via an out-of-round (arkoor) transaction. The `amount_sat` field is required for Ark addresses and Lightning addresses but optional for invoices and offers that already encode an amount. Comments are only supported for Lightning addresses. To send to an on-chain bitcoin address, use `send-onchain` instead.",
+        "description": "Sends an Ark or Lightning payment to the specified destination. Accepts an Ark address, BOLT11 invoice, BOLT12 offer, or Lightning address. Ark address payments are settled instantly via an out-of-round (arkoor) transaction. The `amount_sat` field is required for Ark addresses and Lightning addresses but optional for invoices and offers that already encode an amount. Comments are only supported for Lightning addresses. To send to an on-chain bitcoin address, use `send-onchain` instead. Lightning payments are asynchronous: this response is not proof of payment. Poll the returned payment hash for the final outcome.",
         "operationId": "send",
         "requestBody": {
           "content": {
@@ -3110,7 +3269,7 @@
         },
         "responses": {
           "200": {
-            "description": "Payment sent successfully",
+            "description": "Ark payment completed or Lightning payment initiated",
             "content": {
               "application/json": {
                 "schema": {
@@ -3447,6 +3606,8 @@
       "ArkInfo": {
         "type": "object",
         "required": [
+          "exit_profile",
+          "funded_lightning",
           "network",
           "server_pubkey",
           "mailbox_pubkey",
@@ -3467,9 +3628,17 @@
           "vtxo_expiry_delta"
         ],
         "properties": {
+          "exit_profile": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
           "fees": {
             "$ref": "#/components/schemas/FeeSchedule",
             "description": "The fee schedule outlining any fees that must be paid to interact with the Ark server."
+          },
+          "funded_lightning": {
+            "type": "boolean"
           },
           "htlc_expiry_delta": {
             "type": "integer",
@@ -3548,6 +3717,9 @@
             "type": "string",
             "description": "The Ark server pubkey"
           },
+          "small_anchor_transfers": {
+            "type": "boolean"
+          },
           "tos_link": {
             "type": [
               "string",
@@ -3573,6 +3745,74 @@
             "format": "int32",
             "description": "The number of blocks a VTXO lives before it expires",
             "minimum": 0
+          }
+        }
+      },
+      "ArkSendEstimateRequest": {
+        "type": "object",
+        "description": "Read-only Ark-send estimate. Amounts are sats; no funds or keys are reserved.",
+        "required": [
+          "destination",
+          "amount_sat"
+        ],
+        "properties": {
+          "amount_sat": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "destination": {
+            "type": "string"
+          }
+        }
+      },
+      "ArkSendEstimateResponse": {
+        "type": "object",
+        "required": [
+          "recipient_amount_sat",
+          "recovery_reserve_sat",
+          "service_fee_sat",
+          "total_debit_sat",
+          "remaining_spendable_sat",
+          "input_count",
+          "vtxos_spent"
+        ],
+        "properties": {
+          "input_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "recipient_amount_sat": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "recovery_reserve_sat": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "remaining_spendable_sat": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Snapshot only. Concurrent wallet activity can change this balance.",
+            "minimum": 0
+          },
+          "service_fee_sat": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_debit_sat": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "vtxos_spent": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -5597,6 +5837,38 @@
           {
             "type": "object",
             "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "awaiting-parent-confirmation"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "block",
+              "type"
+            ],
+            "properties": {
+              "block": {
+                "$ref": "#/components/schemas/BlockRef"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "parent-confirmed"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
               "child_txid",
               "origin",
               "type"
@@ -5888,6 +6160,26 @@
               "null"
             ],
             "description": "Optional lightning receive token for authentication of the claim, if\nthe server requires one and there are no existing spendable VTXOs to\nprove ownership of."
+          }
+        }
+      },
+      "LightningOfferRequest": {
+        "type": "object",
+        "required": [
+          "description"
+        ],
+        "properties": {
+          "amount_sat": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Leave empty to let each payer choose the amount.",
+            "minimum": 0
+          },
+          "description": {
+            "type": "string"
           }
         }
       },
@@ -6545,6 +6837,75 @@
           }
         }
       },
+      "OnchainMessageProof": {
+        "type": "object",
+        "required": [
+          "address",
+          "message",
+          "signature",
+          "scheme"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "scheme": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        }
+      },
+      "OnchainMessageRequest": {
+        "type": "object",
+        "required": [
+          "address",
+          "message"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "description": "Exact UTF-8 message, including whitespace; at most 4096 bytes."
+          }
+        }
+      },
+      "OnchainMessageVerification": {
+        "type": "object",
+        "required": [
+          "valid"
+        ],
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          }
+        }
+      },
+      "OnchainMessageVerifyRequest": {
+        "type": "object",
+        "required": [
+          "address",
+          "message",
+          "signature"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        }
+      },
       "OnchainSendManyRequest": {
         "type": "object",
         "required": [
@@ -6987,6 +7348,15 @@
           "destination": {
             "type": "string",
             "description": "The destination can be an Ark address, a BOLT11-invoice, LNURL or a lightning address"
+          },
+          "max_total_sat": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Optional maximum debit, including recovery reserves. Supported for Ark addresses only.\nThe send recomputes its cost and rejects an increase above this limit before signing.",
+            "minimum": 0
           }
         }
       },
