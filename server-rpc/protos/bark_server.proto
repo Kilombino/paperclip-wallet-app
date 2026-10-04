@@ -129,7 +129,9 @@ message ArkInfo {
 
 	bool funded_lightning = 24;
 
-	// last index: 24
+	bool small_anchor_transfers = 25;
+
+	// last index: 25
 }
 
 message OffboardFeeRateResponse {

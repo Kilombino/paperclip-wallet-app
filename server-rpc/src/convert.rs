@@ -144,6 +144,7 @@ impl From<ark::ArkInfo> for protos::ArkInfo {
 		protos::ArkInfo {
 			exit_profile: v.exit_profile,
 		funded_lightning: v.funded_lightning,
+		small_anchor_transfers: v.small_anchor_transfers,
 			network: v.network.to_string(),
 			server_pubkey: v.server_pubkey.serialize().to_vec(),
 			mailbox_pubkey: v.mailbox_pubkey.serialize().to_vec(),
@@ -183,6 +184,7 @@ impl TryFrom<protos::ArkInfo> for ark::ArkInfo {
 		Ok(ark::ArkInfo {
 			exit_profile: v.exit_profile,
 		funded_lightning: v.funded_lightning,
+		small_anchor_transfers: v.small_anchor_transfers,
 			network: v.network.parse().map_err(|_| "invalid network")?,
 			server_pubkey: PublicKey::from_slice(&v.server_pubkey)
 				.map_err(|_| "invalid server pubkey")?,
@@ -807,6 +809,7 @@ mod test {
 		protos::ArkInfo {
 			exit_profile: ark::exit_policy::PAPERCLIP_EXIT_PROFILE,
 			funded_lightning: false,
+			small_anchor_transfers: false,
 			network: "regtest".into(),
 			server_pubkey: pk.serialize().to_vec(),
 			mailbox_pubkey: pk.serialize().to_vec(),

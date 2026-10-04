@@ -57,6 +57,8 @@ pub struct ArkInfo {
 	pub exit_profile: u32,
 	/// Explicit opt-in to funded XBT Lightning contracts.
 	pub funded_lightning: bool,
+	/// Supports 330-sat anchors on ordinary out-of-round transfers.
+	pub small_anchor_transfers: bool,
 	/// The bitcoin network the server operates on
 	pub network: Network,
 	/// The Ark server pubkey

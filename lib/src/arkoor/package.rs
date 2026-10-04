@@ -173,6 +173,27 @@ impl ArkoorPackageBuilder<state::Initial> {
 		inputs: Vec<Vtxo<Full>>, destination: ArkoorDestination, change_policy: VtxoPolicy,
 	) -> Result<(Self, Amount), ArkoorConstructionError> {
 		let funding = crate::exit_policy::paperclip_funding();
+		Self::new_funded_destination_with_funding(inputs, destination, change_policy, funding)
+	}
+
+	/// Construct an ordinary payment with explicitly negotiated recovery funding.
+	/// Callers must obtain server support before signing; legacy entry points retain
+	/// their original budget. This does not change any existing input's signed path.
+	pub fn new_funded_payment_with_funding(
+		inputs: Vec<Vtxo<Full>>, destination: ArkoorDestination, change_policy: VtxoPolicy,
+		funding: crate::tree::signed::TreeExitFunding,
+	) -> Result<(Self, Amount), ArkoorConstructionError> {
+		if !matches!(&destination.policy, VtxoPolicy::Pubkey(_))
+			|| funding.format() != bitcoin_ext::fee::ExitFormat::StandardV2 {
+			return Err(ArkoorConstructionError::IncompatibleExitFunding);
+		}
+		Self::new_funded_destination_with_funding(inputs, destination, change_policy, funding)
+	}
+
+	fn new_funded_destination_with_funding(
+		inputs: Vec<Vtxo<Full>>, destination: ArkoorDestination, change_policy: VtxoPolicy,
+		funding: crate::tree::signed::TreeExitFunding,
+	) -> Result<(Self, Amount), ArkoorConstructionError> {
 		let reserve = funding.per_transaction();
 		let floor = bitcoin_ext::P2TR_DUST + crate::exit_policy::paperclip_policy().claim_fee;
 		let destination_floor = if matches!(&destination.policy, VtxoPolicy::Pubkey(_)) {
@@ -673,6 +694,35 @@ mod test {
 			assert!(output.has_funded_exit());
 			for item in output.transactions() {
 				assert_eq!(output.exit_transaction_fee(item.tx.compute_txid()), Some(Amount::from_sat(1000)));
+			}
+		}
+	}
+
+	#[test]
+	fn funded_payment_small_anchor_preserves_old_recovery_and_value() {
+		let budget = crate::exit_policy::small_anchor_transfer_funding();
+		for (payment, expected_cost) in [(10_000, 3990), (97_340, 2660)] {
+			let (funding, input) = funded_test_input(Amount::from_sat(100_000));
+			let original = input.clone();
+			let (builder, cost) = ArkoorPackageBuilder::new_funded_payment_with_funding(
+				vec![input], ArkoorDestination {
+					total_amount: Amount::from_sat(payment),
+					policy: VtxoPolicy::new_pubkey(bob_public_key()),
+				}, VtxoPolicy::new_pubkey(alice_public_key()), budget,
+			).unwrap();
+			assert_eq!(cost.to_sat(), expected_cost);
+			let outputs = builder.cosign_both(&[alice_keypair()], &server_keypair())
+				.unwrap().build_signed_vtxos();
+			assert_eq!(outputs.iter().map(|v| v.amount()).sum::<Amount>() + cost,
+				Amount::from_sat(100_000));
+			assert_eq!(outputs.iter().find(|v| v.user_pubkey() == bob_public_key())
+				.unwrap().amount().to_sat(), payment);
+			for output in outputs {
+				crate::exit_policy::paperclip_policy().check(&output, &funding,
+					BlockHeight::new(100)).unwrap();
+				for previous in original.transactions() {
+					assert!(output.transactions().any(|tx| tx.tx == previous.tx));
+				}
 			}
 		}
 	}
