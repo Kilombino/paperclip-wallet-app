@@ -1,0 +1,26 @@
+name: Lightning failure regression checks
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_PROFILE_TEST_DEBUG: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - run: sha256sum -c SHARED-SOURCE.sha256
+      - run: nix develop --command cargo check --locked -p bark-wallet -p bark-json -p bark-rest --tests --features onchain-bdk
+      - run: nix develop --command just unit-wallet lightning
+      - run: nix develop --command just unit funded_lightning
+      - name: Generate API documentation
+        run: nix develop --command cargo run --locked -p bark-rest --example dump_api_docs > bark-rest/openapi.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openapi
+          path: bark-rest/openapi.json

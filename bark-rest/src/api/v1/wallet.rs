@@ -705,7 +705,7 @@ pub async fn pending_rounds(
 	summary = "Send a payment",
 	request_body = bark_json::web::SendRequest,
 	responses(
-		(status = 200, description = "Payment sent successfully", body = bark_json::web::SendResponse),
+		(status = 200, description = "Ark payment completed or Lightning payment initiated", body = bark_json::web::SendResponse),
 		(status = 400, description = "The provided destination is not a valid Ark address, \
 			BOLT11 invoice, BOLT12 offer, or Lightning address", body = error::BadRequestError),
 		(status = 500, description = "Internal server error", body = error::InternalServerError)
@@ -716,7 +716,8 @@ pub async fn pending_rounds(
 		`amount_sat` field is required for Ark addresses and Lightning addresses but \
 		optional for invoices and offers that already encode an amount. Comments are \
 		only supported for Lightning addresses. To send to an on-chain bitcoin address, \
-		use `send-onchain` instead.",
+		use `send-onchain` instead. Lightning payments are asynchronous: this response \
+		is not proof of payment. Poll the returned payment hash for the final outcome.",
 	tag = "wallet"
 )]
 #[debug_handler]
@@ -780,7 +781,7 @@ pub async fn send(
 	};
 
 	Ok(axum::Json(bark_json::web::SendResponse {
-		message: "Payment sent successfully".to_string(),
+		message: "Lightning payment initiated; check payment status for the final outcome".to_string(),
 		payment_hash: Some(invoice.payment_hash()),
 	}))
 }

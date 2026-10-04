@@ -714,6 +714,8 @@ impl From<ArkoorPackageCosignResponse> for protos::ArkoorPackageCosignResponse {
 	fn from(v: ArkoorPackageCosignResponse) -> Self {
 		Self {
 			parts: v.responses.into_iter().map(|p| p.into()).collect::<Vec<_>>(),
+			reimbursement_vtxos: Vec::new(),
+			reimbursement_pending: false,
 		}
 	}
 }
