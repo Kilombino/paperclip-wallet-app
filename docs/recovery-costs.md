@@ -1,63 +1,60 @@
 # Recovery costs and low-cost transfers
 
-## Legacy transfer budget
+## Current ordinary Ark transfers
 
-An Ark transfer has no separate service fee. It still deducts 4,000 sats per
-input with one output, or 6,000 sats per input with recipient and change outputs.
-The recipient receives the requested amount. Fragmented balances can cost more.
-These are recovery allocations, not refundable deposits or immediate miner fees.
-Refresh does not credit old allocations back. The server can reclaim unused
-backing under the expiry rules. Expiry is measured in blocks, not a fixed month.
+Paperclip ASP advertises `small_anchor_transfers`. Wallet 0.8.2 uses 330-sat
+standard P2WSH anchors and retains the 1,000-sat miner fee for new ordinary Ark
+transfers. One input allocates **2,660 sats without change** or **3,990 sats with
+change**. There is no separate Ark-send service fee. The recipient receives the
+requested amount and the sender funds the allocation; the ASP does not subsidize
+it. Multiple inputs can cost more. The actual estimate is authoritative.
 
-For a 10,000-sat Lightning receive with service pricing of 100 sats + 0.2%:
-service fee = 120 sats, single-input recovery allocation = 4,000 sats,
-and spendable amount = 5,880 sats. Additional HTLC inputs increase recovery cost.
-This example describes Paperclip pricing, not a protocol-wide fixed service fee.
+The wallet prefers a valid single input and compares constructible selections
+using the same builder for estimates and sends. Exact spends can avoid a change
+output. Admission, expiry, dust, and final-claim checks remain enforced.
 
-## Reduction work
+## Legacy and Lightning budgets
 
-First prefer a valid single input over fragmented inputs. Compare all valid single
-inputs and prefer an exact spend with a 4,000-sat allocation over a change-producing
-spend with a 6,000-sat allocation. Equal-cost inputs retain expiry order. Use the actual package
-builder for both estimates and sends, including exact one-output spends. Retain
-all admission, expiry, dust, and final-claim checks. This reduces avoidable costs;
-it does not lower the 4,000-sat minimum of the current signed profile.
+Older wallets, older saved actions, and wallets connected to servers without the
+capability retain the legacy 4,000-sat allocation per input without change, or
+6,000 sats with recipient and change. Existing signed recovery paths are unchanged.
+The lower budget applies to new ordinary transfers; it does not reprice historical
+allocations or require rewriting old VTXOs.
 
-A smaller reserve must be based on transaction weight and relay requirements,
-not payment value. Removing a checkpoint or sharing a reserve across inputs can
-change recovery and double-spend protection. Neither is a configuration tweak.
+Lightning contracts, round funding, boarding, and offboard preparation retain their
+existing funding. A 10,000-sat Lightning receive with service pricing of 100 sats +
+0.2% deducts 120 sats in service fees and 4,000 sats for a single HTLC input, leaving
+5,880 spendable sats. More HTLC inputs can increase that allocation. This describes
+Paperclip pricing, not a protocol-wide fixed service fee.
 
-A future lower-cost profile needs version negotiation, weight-based parent fees,
-dust-safe anchors, sufficient final-claim funding, and full exit/reorg tests.
-Existing signed VTXOs retain their original budgets. Migrate by cooperative refresh.
+## What the allocation pays for
 
-Refunds need a separate liability ledger. A reserve must not be credited while an
-old recovery path can still consume its backing. The ledger must prevent duplicate
-credits across transfers, refreshes, retries, and reorgs. Credit only after safe
-reclamation, or fund an explicit operator subsidy independently. Do not promise a
-refund before this design is implemented and tested.
+Recovery allocations are not refundable deposits or immediate miner fees.
+Refresh does not credit previous allocations back. The server can reclaim unused
+backing under the expiry rules, measured in blocks rather than a fixed month.
+A smaller reserve must follow transaction weight and relay requirements, not
+payment value. Removing checkpoints or sharing reserves across inputs changes
+recovery and double-spend protection and needs a separate protocol design.
+
+Refunds require a liability ledger that prevents double credits and does not
+credit funds while an old recovery path can still consume its backing. No refund
+or operator-funded subsidy is implemented or promised.
+
+## Compatibility and recovery
+
+The additive capability preserves version-2 recovery encoding and old signed
+ancestors. Old clients can request the legacy budget; new wallets fall back when
+an older server does not advertise support. An updated server and sending wallet
+are both required to obtain the reduction.
+
+The wallet persists its selected budget before cosigning. Retries retain it even
+if server capabilities change; old saved actions default to the legacy budget.
+Do not downgrade a wallet with pending small-anchor actions. Back up the complete
+wallet before updating. See [release validation](small-anchor-validation.md) for
+exit, reorg, relay, watchman and old-wallet checks and the test-suite limitations.
 
 ## Display rules
 
 Show recipient amount, service fee, recovery allocation, total debit and net
-received before confirmation. State that allocations are not separately refundable.
-Never label the whole allocation a miner fee. Link current capability documentation
-from historical test reports; do not present old restrictions as current behavior.
-
-## Negotiated small-anchor transfers
-
-New servers advertise `small_anchor_transfers`. Updated wallets use 330-sat
-standard P2WSH anchors and retain the 1,000-sat miner fee for ordinary Ark sends.
-One input costs 2,660 sats without change or 3,990 sats with change. The sender
-funds the entire allocation; the ASP does not subsidize the transfer.
-
-The wallet uses the same builder for estimates and sends. It persists the
-selected budget in the action before cosigning. Retries keep that budget even
-if server capabilities change. Old action records default to the legacy budget.
-Do not downgrade a wallet with pending small-anchor actions to an older binary.
-
-This capability does not change the version-2 recovery encoding, old signed
-ancestors, round funding, boarding, Lightning contracts, or offboard preparation.
-Old clients can continue to request the legacy budget. An old server does not
-advertise this capability, so an updated wallet uses the legacy budget there.
-A deployment needs both server support and an updated sending wallet.
+received before confirmation. Never label the whole allocation a miner fee or
+promise a separate refund. Historical test reports are not current fee quotes.
