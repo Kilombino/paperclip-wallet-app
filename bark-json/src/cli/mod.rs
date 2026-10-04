@@ -703,6 +703,7 @@ impl LightningSendInfo {
 					SendProgress::PaymentInitiated(_) => "payment-initiated",
 					SendProgress::RevocableHtlcs { .. } => "revocable-htlcs",
 					SendProgress::RevocationStuck { .. } => "revocation-stuck",
+					SendProgress::AwaitingReimbursement { .. } => "awaiting-reimbursement",
 				};
 				LightningSendInfo {
 					payment_hash: send.invoice.payment_hash(),
@@ -883,4 +884,3 @@ mod test {
 		}
 	}
 }
-

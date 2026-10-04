@@ -285,6 +285,10 @@ message ArkoorCosignResponse {
 
 message ArkoorPackageCosignResponse {
 	repeated ArkoorCosignResponse parts = 1;
+	// Signed, server-funded compensation, bound to the revocation recipient.
+	repeated bytes reimbursement_vtxos = 2;
+	// The original refund signatures remain usable while compensation retries.
+	bool reimbursement_pending = 3;
 }
 
 
@@ -293,6 +297,8 @@ message ArkoorPackageCosignResponse {
 message LightningPayHtlcCosignRequest {
 	reserved 1, 3;
 	repeated ArkoorCosignRequest parts = 2;
+	optional string invoice = 4;
+	optional uint64 payment_amount_sat = 5;
 }
 
 message InitiateLightningPaymentRequest {

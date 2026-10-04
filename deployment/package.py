@@ -27,14 +27,14 @@ def package(platform, image, destination, app='paperclip-wallet'):
         (out / 'hooks/pre-start').chmod(0o755)
         write(out / 'umbrel-app.yml', {
             'manifestVersion': 1, 'id': app, 'name': 'Paperclip Wallet Beta', 'tagline': 'On-chain, Ark, and Lightning for XBT',
-            'category': 'bitcoin', 'version': '0.8.2', 'port': 38180,
+            'category': 'bitcoin', 'version': '0.8.3', 'port': 38180,
             'description': 'Beta XBT wallet preset to https://ark.paperclippool.xyz. Configure your compatible XBT blockchain backend. Check live service status before funding. Back up the complete wallet.',
             'developer': 'Paperclip', 'website': 'https://github.com/connorslab/paperclip-wallet-app',
             'repo': 'https://github.com/connorslab/paperclip-wallet-app',
             'support': 'https://github.com/connorslab/paperclip-wallet-app/issues',
             'icon': 'https://raw.githubusercontent.com/connorslab/paperclip-wallet-app/main/web/icon.svg', 'dependencies': [], 'gallery': [], 'path': '', 'defaultUsername': '',
             'deterministicPassword': True, 'submitter': 'Paperclip',
-            'releaseNotes': 'Reduces ordinary Ark transfer recovery allocations by 33.5% on supporting servers: 2,660 sats without change or 3,990 sats with change per input. Preserves signed recovery paths, legacy-server support, and pending transfer budgets across restarts. Lightning budgets are unchanged. Back up the complete wallet before upgrading; do not downgrade with pending transfers. Beta, not independently audited.'
+            'releaseNotes': 'Adds invoice and route preflight with compatible servers, verified reimbursement of eligible failed-Lightning recovery costs, and accurate asynchronous payment status. Older wallets remain supported by the updated ASP through separate inbox reimbursements. Funded exit reserves remain intact. Back up the complete wallet before upgrading; do not downgrade with pending reimbursement actions. Beta, not independently audited.'
         })
         write(out / 'docker-compose.yml', {'services': {
             'app_proxy': {'environment': {'APP_HOST': app + '_wallet_1', 'APP_PORT': '3000'}},
@@ -47,7 +47,7 @@ def package(platform, image, destination, app='paperclip-wallet'):
         (out / 'data/.gitkeep').touch()
     elif platform == 'startos':
         manifest = {
-            'id': app, 'title': 'Paperclip Wallet Beta', 'version': '0.8.2.0', 'license': 'MIT',
+            'id': app, 'title': 'Paperclip Wallet Beta', 'version': '0.8.3.0', 'license': 'MIT',
             'release-notes': 'Beta package for StartOS 0.3.5 only. Paperclip server preset. Not compatible with StartOS 0.4.',
             'wrapper-repo': 'https://github.com/connorslab/paperclip-wallet-app',
             'upstream-repo': 'https://github.com/connorslab/paperclip-wallet-app',
