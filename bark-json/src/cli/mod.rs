@@ -31,6 +31,8 @@ use crate::serde_utils;
 pub struct ArkInfo {
 	pub exit_profile: u32,
 	pub funded_lightning: bool,
+	#[serde(default)]
+	pub small_anchor_transfers: bool,
 	/// The bitcoin network the server operates on
 	#[cfg_attr(feature = "utoipa", schema(value_type = String))]
 	pub network: bitcoin::Network,
@@ -110,6 +112,8 @@ impl<'de> serde::Deserialize<'de> for ArkInfo {
 			exit_profile: u32,
 			#[serde(default)]
 			funded_lightning: bool,
+		#[serde(default)]
+		small_anchor_transfers: bool,
 			network: bitcoin::Network,
 			server_pubkey: PublicKey,
 			mailbox_pubkey: PublicKey,
@@ -150,6 +154,7 @@ impl<'de> serde::Deserialize<'de> for ArkInfo {
 		Ok(ArkInfo {
 			exit_profile: v.exit_profile,
 		funded_lightning: v.funded_lightning,
+		small_anchor_transfers: v.small_anchor_transfers,
 			network: v.network,
 			server_pubkey: v.server_pubkey,
 			mailbox_pubkey: v.mailbox_pubkey,
@@ -188,6 +193,7 @@ impl<T: Borrow<ark::ArkInfo>> From<T> for ArkInfo {
 	    ArkInfo {
 			exit_profile: v.exit_profile,
 		funded_lightning: v.funded_lightning,
+		small_anchor_transfers: v.small_anchor_transfers,
 			network: v.network,
 			server_pubkey: v.server_pubkey,
 			mailbox_pubkey: v.mailbox_pubkey,
@@ -697,6 +703,7 @@ impl LightningSendInfo {
 					SendProgress::PaymentInitiated(_) => "payment-initiated",
 					SendProgress::RevocableHtlcs { .. } => "revocable-htlcs",
 					SendProgress::RevocationStuck { .. } => "revocation-stuck",
+					SendProgress::AwaitingReimbursement { .. } => "awaiting-reimbursement",
 				};
 				LightningSendInfo {
 					payment_hash: send.invoice.payment_hash(),
@@ -779,6 +786,7 @@ mod test {
 		ArkInfo {
 			exit_profile: ark::exit_policy::PAPERCLIP_EXIT_PROFILE,
 			funded_lightning: false,
+			small_anchor_transfers: false,
 			network: bitcoin::Network::Regtest,
 			server_pubkey: pubkey,
 			mailbox_pubkey: pubkey,
@@ -851,6 +859,7 @@ mod test {
 			ark::ArkInfo {
 				exit_profile: ark::exit_policy::PAPERCLIP_EXIT_PROFILE,
 			funded_lightning: false,
+			small_anchor_transfers: false,
 				network: j.network,
 				server_pubkey: j.server_pubkey,
 				mailbox_pubkey: j.mailbox_pubkey,
@@ -875,4 +884,3 @@ mod test {
 		}
 	}
 }
-

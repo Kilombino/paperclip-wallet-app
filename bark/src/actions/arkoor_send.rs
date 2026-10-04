@@ -39,6 +39,9 @@ pub struct ArkoorSend {
 	pub amount: Amount,
 	pub input_vtxo_ids: Vec<VtxoId>,
 	pub change_key_index: u32,
+	/// Fixed at planning; missing on old actions means the legacy budget.
+	#[serde(default)]
+	pub small_anchor_transfer: bool,
 	/// Change piece amounts fixed at start. `None` when persisted by a
 	/// pre-split bark, meaning one whole change output.
 	#[serde(default, with = "crate::utils::serde::opt_amount_vec_sat")]
@@ -263,7 +266,7 @@ pub(crate) async fn start_arkoor_send(
 	if destination.policy().user_pubkey() == change_keypair.public_key() {
 		bail!("Cannot create arkoor to same address as change");
 	}
-	let (inputs, recovery_reserve) = wallet.plan_arkoor_payment(
+	let (inputs, recovery_reserve, small_anchor_transfer) = wallet.plan_arkoor_payment(
 		amount, destination.policy().clone(), change_keypair.public_key(), chosen.as_deref(),
 	).await?;
 	check_send_cost(amount, recovery_reserve, max_total)?;
@@ -287,6 +290,7 @@ pub(crate) async fn start_arkoor_send(
 		amount,
 		input_vtxo_ids,
 		change_key_index,
+		small_anchor_transfer,
 		change_pieces: Some(split_change_amount(
 			change, amount, wallet.config().change_vtxo_split_factor,
 		)),
@@ -322,7 +326,7 @@ async fn run_cosign(wallet: &Wallet, send: &ArkoorSend) -> Result<Progress, Adva
 	// becomes `AdvanceError::Server` so the executor can route a genuine
 	// rejection to on_rejection instead of retrying forever.
 	let arkoor = wallet.create_checkpointed_arkoor_with_vtxos(
-		dest, inputs, change_keypair, send.change_pieces.clone(),
+		dest, inputs, change_keypair, send.change_pieces.clone(), send.small_anchor_transfer,
 	).await?;
 
 	let initial_update = MovementUpdate::new()
@@ -423,6 +427,7 @@ mod test {
 			amount: Amount::from_sat(10_000),
 			input_vtxo_ids: vec![],
 			change_key_index: 0,
+			small_anchor_transfer: false,
 			change_pieces: Some(vec![Amount::from_sat(5_000), Amount::from_sat(5_000)]),
 			progress: Progress::Cosigning,
 		}
@@ -437,6 +442,16 @@ mod test {
 		json.as_object_mut().unwrap().remove("change_pieces").unwrap();
 		let old = serde_json::from_value::<ArkoorSend>(json).unwrap();
 		assert_eq!(old.change_pieces, None);
+	}
+
+	#[test]
+	fn recovery_budget_survives_restart_and_old_actions_keep_original_budget() {
+		let mut send = dummy_send();
+		send.small_anchor_transfer = true;
+		let mut json = serde_json::to_value(&send).unwrap();
+		assert!(serde_json::from_value::<ArkoorSend>(json.clone()).unwrap().small_anchor_transfer);
+		json.as_object_mut().unwrap().remove("small_anchor_transfer");
+		assert!(!serde_json::from_value::<ArkoorSend>(json).unwrap().small_anchor_transfer);
 	}
 
 	#[test]

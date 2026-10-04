@@ -224,6 +224,7 @@ impl Wallet {
 		inputs: impl IntoIterator<Item = WalletVtxo>,
 		change_keypair: Keypair,
 		change_pieces: Option<Vec<Amount>>,
+		small_anchor_transfer: bool,
 	) -> Result<ArkoorCreateResult, ArkoorCreateError> {
 		let (mut srv, _) = self.require_server().await?;
 		let input_ids = inputs.into_iter().map(|v| v.id()).collect::<Vec<_>>();
@@ -266,8 +267,10 @@ impl Wallet {
 		// The profile fixes the output allocation. Older split-piece hints cannot
 		// change recipient amounts or create dust recovery outputs.
 		let _ = change_pieces;
-		let (builder, recovery_reserve) = ArkoorPackageBuilder::new_funded_payment(
-			inputs, arkoor_dest.clone(), VtxoPolicy::new_pubkey(change_pubkey),
+		let funding = if small_anchor_transfer { ark::exit_policy::small_anchor_transfer_funding() }
+			else { ark::exit_policy::paperclip_funding() };
+		let (builder, recovery_reserve) = ArkoorPackageBuilder::new_funded_payment_with_funding(
+			inputs, arkoor_dest.clone(), VtxoPolicy::new_pubkey(change_pubkey), funding,
 		).context("insufficient funded recovery reserves; refresh or select more inputs")?;
 		let builder = builder.generate_user_nonces(&user_keypairs)
 			.context("invalid nb of keypairs")?;
@@ -342,15 +345,20 @@ impl Wallet {
 	}
 
 	/// Read-only plan shared by estimates and sends. No keys, locks or signatures are created.
+	/// Returns the inputs, the recovery reserve and whether the server's smaller transfer
+	/// anchors are used.
 	pub(crate) async fn plan_arkoor_payment(
 		&self, amount: Amount, policy: VtxoPolicy, change: PublicKey, chosen: Option<&[VtxoId]>,
-	) -> anyhow::Result<(Vec<WalletVtxo>, Amount)> {
+	) -> anyhow::Result<(Vec<WalletVtxo>, Amount, bool)> {
 		self.inner.chain.require_funded_policy().await?;
-		let _ = self.require_server().await?;
+		let (_, info) = self.require_server().await?;
+		let small_anchor_transfer = info.small_anchor_transfers;
+		let funding = if small_anchor_transfer { ark::exit_policy::small_anchor_transfer_funding() }
+			else { ark::exit_policy::paperclip_funding() };
 		ensure!(amount > Amount::ZERO, "payment amount must be positive");
 		let tip = self.inner.chain.tip().await?;
 		let candidates = self.spendable_vtxos().await?;
-		let reserve = ark::exit_policy::paperclip_funding().per_transaction();
+		let reserve = funding.per_transaction();
 		if let Some(chosen) = chosen {
 			// Coin control: spend exactly these, all of them, or refuse.
 			ensure!(!chosen.is_empty(), "no VTXOs chosen");
@@ -372,9 +380,10 @@ impl Wallet {
 			ensure!(total >= minimum,
 				"the chosen VTXOs hold {} but this payment needs at least {} (amount plus {} recovery reserve)",
 				total, minimum, minimum - amount);
-			return self.check_arkoor_inputs(inputs, amount, policy, change, tip).await
+			let (inputs, reserve) = self.check_arkoor_inputs(inputs, amount, policy, change, tip, funding).await
 				.with_context(|| format!("the chosen VTXOs hold {}: spend them whole (amount {}) or leave \
-					a change of at least 1330 sats after 3 reserves per coin", total, total - minimum + amount));
+					a change of at least 1330 sats after 3 reserves per coin", total, total - minimum + amount))?;
+			return Ok((inputs, reserve, small_anchor_transfer));
 		}
 		// Automatic selection: the cheapest constructible single coin, then bounded
 		// combinations, priced by the funded package itself.
@@ -386,21 +395,22 @@ impl Wallet {
 		let (inputs, _) = selection.select_ark_constructible(candidates, |inputs| {
 			let hydrated = inputs.iter().map(|v| full.get(&v.id()).cloned()
 				.context("Missing Ark input ancestry")).collect::<anyhow::Result<Vec<_>>>()?;
-			match ArkoorPackageBuilder::new_funded_payment(hydrated,
+			match ArkoorPackageBuilder::new_funded_payment_with_funding(hydrated,
 				ArkoorDestination { total_amount: amount, policy: policy.clone() },
-				VtxoPolicy::new_pubkey(change),
+				VtxoPolicy::new_pubkey(change), funding,
 			) {
 				Ok((_, reserve)) => Ok(Some(reserve)),
 				Err(ArkoorConstructionError::Dust | ArkoorConstructionError::Unbalanced { .. }) => Ok(None),
 				Err(error) => Err(error.into()),
 			}
 		})?;
-		self.check_arkoor_inputs(inputs, amount, policy, change, tip).await
+		let (inputs, reserve) = self.check_arkoor_inputs(inputs, amount, policy, change, tip, funding).await?;
+		Ok((inputs, reserve, small_anchor_transfer))
 	}
 
 	async fn check_arkoor_inputs(
 		&self, inputs: Vec<WalletVtxo>, amount: Amount, policy: VtxoPolicy, change: PublicKey,
-		tip: BlockHeight,
+		tip: BlockHeight, funding: ark::tree::signed::TreeExitFunding,
 	) -> anyhow::Result<(Vec<WalletVtxo>, Amount)> {
 		let ids = inputs.iter().map(|v| v.id()).collect::<Vec<_>>();
 		let full = self.inner.db.get_full_vtxos(&ids).await?;
@@ -411,8 +421,8 @@ impl Wallet {
 				.and_then(|v| v.checked_add(tip.to_u32())).context("exit deadline overflow")?;
 			ensure!(deadline < input.expiry_height().to_u32(), "refresh required before another transfer");
 		}
-		let (_, recovery_reserve) = ArkoorPackageBuilder::new_funded_payment(
-			full, ArkoorDestination { total_amount: amount, policy }, VtxoPolicy::new_pubkey(change),
+		let (_, recovery_reserve) = ArkoorPackageBuilder::new_funded_payment_with_funding(
+			full, ArkoorDestination { total_amount: amount, policy }, VtxoPolicy::new_pubkey(change), funding,
 		).context("payment would leave an unfunded or dust recovery output; refresh first")?;
 		Ok((inputs, recovery_reserve))
 	}

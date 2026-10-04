@@ -25,7 +25,7 @@ use ark::arkoor::package::{ArkoorPackageBuilder, ArkoorPackageCosignResponse};
 use ark::lightning::{Invoice, PaymentHash, PaymentStatus, Preimage};
 use ark::mailbox::MailboxIdentifier;
 use ark::util::IteratorExt;
-use ark::{ProtocolEncoding, VtxoId, VtxoPolicy};
+use ark::{ProtocolEncoding, Vtxo, VtxoId, VtxoPolicy};
 use bitcoin_ext::BlockHeight;
 use server_rpc::protos::{self, lightning_payment_status};
 
@@ -168,8 +168,15 @@ impl WalletAction for LightningSend {
 				}
 			},
 			Progress::RevocableHtlcs { htlcs, revocation } |
-			Progress::RevocationStuck { htlcs, revocation } => {
-				handle_lightning_send_htlcs_revocation(wallet, &self, &htlcs, &revocation).await?;
+			Progress::RevocationStuck { htlcs, revocation } |
+			Progress::AwaitingReimbursement { htlcs, revocation } => {
+				if !handle_lightning_send_htlcs_revocation(wallet, &self, &htlcs, &revocation).await? {
+					return Ok(Advance::Park {
+						state: LightningSend {
+							progress: Progress::AwaitingReimbursement { htlcs, revocation }, ..self
+						}, wake_after: Some(Duration::from_secs(30)), error: None,
+					});
+				}
 				return Ok(Advance::Done);
 			},
 		};
@@ -181,6 +188,7 @@ impl WalletAction for LightningSend {
 	/// that. A send that learns the preimage settles and holds nothing.
 	fn pending_balance_vtxo_ids(&self) -> Vec<VtxoId> {
 		match &self.progress {
+			Progress::AwaitingReimbursement { .. } => Vec::new(),
 			Progress::Start => self.input_vtxo_ids.clone(),
 			Progress::HtlcReceived(h)
 				| Progress::PaymentInitiated(h)
@@ -194,6 +202,7 @@ impl WalletAction for LightningSend {
 		-> anyhow::Result<Advance<Self>>
 	{
 		match self.progress.clone() {
+			Progress::AwaitingReimbursement { .. } => {},
 			Progress::Start => {
 				if self.is_htlc_near_expiry(wallet).await? {
 					let err = anyhow!("Could not start lightning send and HTLCs are near expiry");
@@ -233,6 +242,9 @@ impl WalletAction for LightningSend {
 
 	async fn on_rejection(self, wallet: &Wallet, error: AdvanceError) -> anyhow::Result<Advance<Self>> {
 		match self.progress.clone() {
+			Progress::AwaitingReimbursement { .. } => Ok(Advance::Park {
+				state: self, wake_after: Some(Duration::from_secs(30)), error: Some(error),
+			}),
 			// Nothing committed server-side: drop the locks and the row
 			// ourselves, then bail. We can't rely on the executor's
 			// `Advance::Done` path because we want the original error
@@ -240,6 +252,12 @@ impl WalletAction for LightningSend {
 			Progress::Start => {
 				let id = self.id();
 				error!("Could not start lightning send {}: {:?}", id, error);
+				if let Some(movement) = self.movement_id {
+					wallet.inner.movements.finish_movement_with_update(
+						movement, MovementStatus::Failed, MovementUpdate::new()
+							.effective_balance(SignedAmount::ZERO).fee(Amount::ZERO),
+					).await?;
+				}
 				if let Err(cancel_err) = wallet.stop_wallet_action(&id).await {
 					warn!("could not cancel start-phase lightning send {}: {:#}", id, cancel_err);
 				}
@@ -294,6 +312,9 @@ pub enum Progress {
 	/// until automatic exit is permissible when the HTLCs are near expiry,
 	/// provided [Wallet::allow_lightning_send_to_exit] is called.
 	RevocationStuck { htlcs: Htlcs, revocation: Revocation },
+	/// The payment principal is already spendable. Retry only compensation;
+	/// never initiate an exit for these already-revoked HTLCs.
+	AwaitingReimbursement { htlcs: Htlcs, revocation: Revocation },
 }
 
 /// The HTLC vtxos the server cosigned for us, plus the movement they
@@ -376,6 +397,9 @@ pub(crate) async fn start_lightning_send(
 
 	invoice.require_xbt()?;
 	invoice.check_signature()?;
+	let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
+	ensure!(invoice.has_send_lifetime(now),
+		"Invoice expired or expires within 30 seconds; request a fresh invoice");
 
 	let payment_amount = invoice.get_payment_amount(user_amount)?;
 	if payment_amount == Amount::ZERO {
@@ -463,6 +487,8 @@ pub(crate) async fn request_lightning_send_htlcs(
 
 	let cosign_request = protos::LightningPayHtlcCosignRequest {
 		parts: protos::ArkoorPackageCosignRequest::from(builder.cosign_request()).parts,
+		invoice: Some(send.invoice.to_string()),
+		payment_amount_sat: Some(send.payment_amount.to_sat()),
 	};
 	let response = srv.client.request_lightning_pay_htlc_cosign(cosign_request).await
 		.map_err(AdvanceError::Server)?.into_inner();
@@ -686,7 +712,7 @@ pub(crate) async fn revoke_lightning_send_htlcs(
 	send: &LightningSend,
 	htlcs: &Htlcs,
 	revocation: &Revocation,
-) -> Result<(), AdvanceError> {
+) -> Result<bool, AdvanceError> {
 	let (mut srv, _) = wallet.require_server().await?;
 
 	debug!("Revoking {} HTLC vtxos for payment {}",
@@ -702,7 +728,7 @@ pub(crate) async fn revoke_lightning_send_htlcs(
 	}
 
 	let revocation_claim_policy = VtxoPolicy::new_pubkey(revocation.key);
-	let (builder, _) = ArkoorPackageBuilder::new_funded_lightning_claim(
+	let (builder, claim_reserve) = ArkoorPackageBuilder::new_funded_lightning_claim(
 		htlc_vtxos.clone(),
 		revocation_claim_policy,
 	)
@@ -714,18 +740,43 @@ pub(crate) async fn revoke_lightning_send_htlcs(
 	let response = srv.client
 		.request_lightning_pay_htlc_revocation(cosign_request).await
 		.map_err(AdvanceError::Server)?.into_inner();
+	let reimbursement_pending = response.reimbursement_pending;
+	let compensation = response.reimbursement_vtxos.iter()
+		.map(|b| Vtxo::deserialize(b)).collect::<Result<Vec<_>, _>>()
+		.context("invalid reimbursement VTXO")?;
+	let mut compensation_amount = Amount::ZERO;
+	for vtxo in &compensation {
+		if *vtxo.policy() != VtxoPolicy::new_pubkey(revocation.key) {
+			return Err(anyhow!("reimbursement addressed to another recipient").into());
+		}
+		wallet.validate_vtxo(vtxo).await.map_err(AdvanceError::Vtxo)?;
+		compensation_amount = compensation_amount.checked_add(vtxo.amount())
+			.context("reimbursement amount overflow")?;
+	}
+	if compensation_amount > send.recovery_reserve.checked_add(claim_reserve).context("reserve overflow")? {
+		return Err(anyhow!("reimbursement exceeds verified recovery costs").into());
+	}
 	let cosign_resp = ArkoorPackageCosignResponse::try_from(response)
 		.context("Failed to parse cosign response from server")?;
 
-	let vtxos = builder
+	let mut vtxos = builder
 		.user_cosign(&htlc_keypairs, cosign_resp)
 		.context("Failed to cosign vtxos")?
 		.build_signed_vtxos();
+	vtxos.extend(compensation);
+	if vtxos.iter().map(|v| v.id()).collect::<std::collections::HashSet<_>>().len() != vtxos.len() {
+		return Err(anyhow!("duplicate refund or reimbursement VTXO").into());
+	}
 
 	// Ensure revocation vtxos are fully registered server-side before the cosign.
 	if let Err(e) = wallet.register_vtxo_transactions_with_server(&vtxos).await {
 		warn!("failed to register lightning-send revocation vtxo transactions with server: {:#}", e);
 	}
+	// Import the principal even if the ASP's separate compensation pool is
+	// temporarily empty. Imports are idempotent and never unspend old outputs.
+	wallet.store_spendable_vtxos(&vtxos).await?;
+	wallet.mark_vtxos_as_spent(&htlc_vtxos).await?;
+	if reimbursement_pending { return Ok(false); }
 
 	let revoked = vtxos.iter().map(|v| v.amount()).sum::<Amount>();
 	let effective = -(send.total_amount() + send.recovery_reserve).to_signed().context("total amount out of range")? +
@@ -744,10 +795,8 @@ pub(crate) async fn revoke_lightning_send_htlcs(
 			.fee(effective.unsigned_abs())
 			.produced_vtxos(&vtxos),
 	).await.context("failed to update movement")?;
-	wallet.store_spendable_vtxos(&vtxos).await?;
-	wallet.mark_vtxos_as_spent(&htlc_vtxos).await?;
 
-	Ok(())
+	Ok(true)
 }
 
 /// Escalation: when revocation has failed and the HTLC vtxos are about
@@ -797,7 +846,7 @@ pub(crate) async fn handle_lightning_send_htlcs_revocation(
 	send: &LightningSend,
 	htlcs: &Htlcs,
 	revocation: &Revocation,
-) -> Result<(), AdvanceError> {
+) -> Result<bool, AdvanceError> {
 	let payment_hash = send.invoice.payment_hash();
 	let tip = wallet.inner.chain.tip().await?;
 
