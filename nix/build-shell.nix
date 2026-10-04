@@ -54,6 +54,8 @@ in {
 			pkgs.gcc.cc.lib
 			pkgs.openssl
 			pkgs.protobuf
+			# Swagger's build script invokes curl; use the same runtime as this shell.
+			pkgs.curl
 
 			# For generating clients
 			openapiGeneratorCli
