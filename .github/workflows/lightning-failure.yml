@@ -1,6 +1,8 @@
 name: Lightning failure regression checks
 on:
   workflow_dispatch:
+  push:
+    branches: ['fix/lightning-failed-payment-costs']
 permissions:
   contents: read
 jobs:
