@@ -62,7 +62,7 @@ promise a separate refund. Historical test reports are not current fee quotes.
 ## Candidate: failed Lightning sends
 
 The `fix/lightning-failed-payment-costs` branch is not a deployed release.
-Fresh sends require invoice and amount preflight before the ASP signs the HTLC.
+Updated wallets send invoice and amount preflight before the ASP signs the HTLC.
 Expired or nearly expired invoices are rejected. Public BOLT11 invoices without
 route hints also receive a route check within the existing safe delay and fee
 limits. This cannot guarantee routing success or fully inspect private/blinded
@@ -76,9 +76,20 @@ return the same signed grant. Principal recovery remains available if ASP
 liquidity cannot immediately cover compensation. Uncertain failures are not
 automatically approved. The original recovery funding remains intact.
 
-Deploy with the matching wallet engine. Older clients cannot create fresh
-Lightning sends against the new server, although existing recovery requests
-remain accepted. Do not downgrade wallets with pending reimbursement actions.
-Migration V67 does not backfill historical costs or reimburse old incidents.
-The REST send response now says Lightning payment was initiated, not successful;
+Older wallets may omit both preflight fields and continue using the existing
+send and recovery protocol. Their invoices are checked at initiation, after the
+HTLC has been signed, so they cannot receive the earlier route/expiry protection.
+Eligible recovery costs are delivered as a separate ordinary Ark inbox payment,
+using the original refund key and the sender inbox supplied at initiation. The
+failed movement may still show its old cost; the separate receipt offsets it.
+Wallets without an inbox retain a pending credit for operator reconciliation.
+
+Grant, pool spend and inbox delivery commit together. The server retries queued
+legacy credits when liquidity becomes available, including after restart. It
+never removes exit reserves or increases Lightning's safe delay limit. Updated
+wallets retain inline compensation and the awaiting-reimbursement state. Do not
+downgrade wallets with pending reimbursement actions. Migrations V67/V68 do not
+backfill historical costs or reimburse old incidents.
+
+The REST send response says Lightning payment was initiated, not successful;
 clients must check the final outcome using the returned payment hash.
