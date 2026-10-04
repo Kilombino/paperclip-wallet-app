@@ -37,8 +37,8 @@ payment value. Removing checkpoints or sharing reserves across inputs changes
 recovery and double-spend protection and needs a separate protocol design.
 
 Refunds require a liability ledger that prevents double credits and does not
-credit funds while an old recovery path can still consume its backing. No refund
-or operator-funded subsidy is implemented or promised.
+credit funds while an old recovery path can still consume its backing. The failed-Lightning candidate below adds a separate ASP-funded subsidy; it does
+not release or reuse backing from an existing recovery path.
 
 ## Compatibility and recovery
 
@@ -58,3 +58,27 @@ exit, reorg, relay, watchman and old-wallet checks and the test-suite limitation
 Show recipient amount, service fee, recovery allocation, total debit and net
 received before confirmation. Never label the whole allocation a miner fee or
 promise a separate refund. Historical test reports are not current fee quotes.
+
+## Candidate: failed Lightning sends
+
+The `fix/lightning-failed-payment-costs` branch is not a deployed release.
+Fresh sends require invoice and amount preflight before the ASP signs the HTLC.
+Expired or nearly expired invoices are rejected. Public BOLT11 invoices without
+route hints also receive a route check within the existing safe delay and fee
+limits. This cannot guarantee routing success or fully inspect private/blinded
+routes.
+
+After an eligible failure before dispatch, the ASP can compensate the actual
+recorded setup and revocation costs using its own funded VTXOs. Eligibility is
+limited to verified local rejections with no CLN send records, or expiration
+before any attempt. The grant and its pool spend commit atomically and retries
+return the same signed grant. Principal recovery remains available if ASP
+liquidity cannot immediately cover compensation. Uncertain failures are not
+automatically approved. The original recovery funding remains intact.
+
+Deploy with the matching wallet engine. Older clients cannot create fresh
+Lightning sends against the new server, although existing recovery requests
+remain accepted. Do not downgrade wallets with pending reimbursement actions.
+Migration V67 does not backfill historical costs or reimburse old incidents.
+The REST send response now says Lightning payment was initiated, not successful;
+clients must check the final outcome using the returned payment hash.
