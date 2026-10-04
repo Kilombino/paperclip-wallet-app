@@ -20,6 +20,7 @@ jobs:
       - run: nix develop --command cargo check --locked -p bark-wallet -p bark-json -p bark-rest --tests --features onchain-bdk
       - run: nix develop --command just unit-wallet lightning
       - run: nix develop --command just unit funded_lightning
+      - run: nix develop --command just unit lightning_send_lifetime
       - name: Generate API documentation
         run: nix develop --command cargo run --locked -p bark-rest --example dump_api_docs > bark-rest/openapi.json
       - uses: actions/upload-artifact@v4

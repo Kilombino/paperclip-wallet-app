@@ -250,6 +250,12 @@ impl WalletAction for LightningSend {
 			Progress::Start => {
 				let id = self.id();
 				error!("Could not start lightning send {}: {:?}", id, error);
+				if let Some(movement) = self.movement_id {
+					wallet.inner.movements.finish_movement_with_update(
+						movement, MovementStatus::Failed, MovementUpdate::new()
+							.effective_balance(SignedAmount::ZERO).fee(Amount::ZERO),
+					).await?;
+				}
 				if let Err(cancel_err) = wallet.stop_wallet_action(&id).await {
 					warn!("could not cancel start-phase lightning send {}: {:#}", id, cancel_err);
 				}
@@ -390,7 +396,7 @@ pub(crate) async fn start_lightning_send(
 	invoice.require_xbt()?;
 	invoice.check_signature()?;
 	let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
-	ensure!(!invoice.expired_at(now + Duration::from_secs(30)),
+	ensure!(invoice.has_send_lifetime(now),
 		"Invoice expired or expires within 30 seconds; request a fresh invoice");
 
 	let payment_amount = invoice.get_payment_amount(user_amount)?;

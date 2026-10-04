@@ -237,6 +237,12 @@ pub enum ValidateIssuanceError {
 }
 
 impl Invoice {
+	/// Leave time to check a route and sign the HTLC before expiry.
+	pub fn has_send_lifetime(&self, now: std::time::Duration) -> bool {
+		now.checked_add(std::time::Duration::from_secs(30))
+			.is_some_and(|deadline| !self.expired_at(deadline))
+	}
+
 	/// Whether the invoice expired at `now`, measured from the Unix epoch.
 	/// Use a checked sum so an invalid deadline cannot wrap into the past.
 	pub fn expired_at(&self, now: std::time::Duration) -> bool {
@@ -517,6 +523,27 @@ mod test {
 	use lightning::offers::offer::{CurrencyCode, OfferBuilder};
 	use lightning::sign::EntropySource;
 	use lightning::types::features::BlindedHopFeatures;
+	use lightning_invoice::{Currency, InvoiceBuilder, PaymentSecret};
+	use std::time::Duration;
+
+	#[test]
+	fn lightning_send_lifetime_rejects_expired_and_near_expiry_invoices() {
+		let secp = Secp256k1::new();
+		let secret = SecretKey::from_slice(&[2; 32]).unwrap();
+		let invoice: Invoice = InvoiceBuilder::new(Currency::Regtest)
+			.description("expiry regression".into())
+			.payment_hash(bitcoin::hashes::sha256::Hash::hash(b"expiry"))
+			.payment_secret(PaymentSecret([42; 32]))
+			.duration_since_epoch(Duration::from_secs(1000))
+			.expiry_time(Duration::from_secs(900))
+			.min_final_cltv_expiry_delta(80)
+			.build_signed(|hash| secp.sign_ecdsa_recoverable(hash, &secret)).unwrap().into();
+		assert!(invoice.has_send_lifetime(Duration::from_secs(1800)));
+		assert!(!invoice.has_send_lifetime(Duration::from_secs(1890)));
+		assert!(!invoice.has_send_lifetime(Duration::from_secs(1900)));
+		assert!(!invoice.has_send_lifetime(Duration::from_secs(2274)));
+		assert!(!invoice.has_send_lifetime(Duration::MAX));
+	}
 
 	struct FixedEntropy;
 
