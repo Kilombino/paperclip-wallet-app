@@ -210,8 +210,8 @@ pub fn stop() {
 mod jni_api {
 	use super::*;
 	use jni::JNIEnv;
-	use jni::objects::{JClass, JString};
-	use jni::sys::{jint, jstring};
+	use jni::objects::{JByteArray, JClass, JString};
+	use jni::sys::{jboolean, jbyteArray, jint, jstring};
 
 	/// `ArkNative.start(datadir, port, mnemonic, passphrase)`: the bearer token, or
 	/// "ERR:<message>". `mnemonic` is null while the app has no Ark wallet yet;
@@ -253,6 +253,81 @@ mod jni_api {
 			Err(e) => format!("ERR:bad datadir: {e}"),
 		};
 		env.new_string(out).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
+	}
+
+	// ------------------------------------------------------------ libsecp256k1 for the wallet
+	//
+	// The wallet's own signatures (BTC sends, coinjoin, Nostr events) go through these, so the
+	// secret-key arithmetic runs in libsecp256k1's constant-time code instead of the JVM's
+	// BigInteger. A null return means the key or message was not valid.
+
+	fn secp() -> &'static bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All> {
+		static CTX: OnceLock<bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>> = OnceLock::new();
+		CTX.get_or_init(|| {
+			let mut c = bitcoin::secp256k1::Secp256k1::new();
+			c.randomize(&mut rand::thread_rng());
+			c
+		})
+	}
+
+	fn bytes32(env: &JNIEnv, a: &JByteArray) -> Option<[u8; 32]> {
+		let v = env.convert_byte_array(a).ok()?;
+		let out: [u8; 32] = v.as_slice().try_into().ok()?;
+		Some(out)
+	}
+
+	fn ret(env: &JNIEnv, out: Option<Vec<u8>>) -> jbyteArray {
+		match out {
+			Some(b) => env.byte_array_from_slice(&b).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut()),
+			None => std::ptr::null_mut(),
+		}
+	}
+
+	/// `ArkNative.secpPubkey(secret)`: the 65-byte uncompressed public key.
+	#[unsafe(no_mangle)]
+	pub extern "system" fn Java_com_kilombino_pyblockwatch_ark_ArkNative_secpPubkey<'l>(
+		env: JNIEnv<'l>, _class: JClass<'l>, secret: JByteArray<'l>,
+	) -> jbyteArray {
+		use bitcoin::secp256k1::{PublicKey, SecretKey};
+		let out = bytes32(&env, &secret)
+			.and_then(|mut k| { let sk = SecretKey::from_slice(&k).ok(); k.fill(0); sk })
+			.map(|sk| PublicKey::from_secret_key(secp(), &sk).serialize_uncompressed().to_vec());
+		ret(&env, out)
+	}
+
+	/// `ArkNative.secpEcdsaSign(secret, hash, lowR)`: RFC 6979, low-S, compact r‖s (64 bytes);
+	/// with `lowR`, Bitcoin Core's grind for a 32-byte r.
+	#[unsafe(no_mangle)]
+	pub extern "system" fn Java_com_kilombino_pyblockwatch_ark_ArkNative_secpEcdsaSign<'l>(
+		env: JNIEnv<'l>, _class: JClass<'l>, secret: JByteArray<'l>, hash: JByteArray<'l>, low_r: jboolean,
+	) -> jbyteArray {
+		use bitcoin::secp256k1::{Message, SecretKey};
+		let out = (|| {
+			let mut k = bytes32(&env, &secret)?;
+			let sk = SecretKey::from_slice(&k).ok();
+			k.fill(0);
+			let msg = Message::from_digest(bytes32(&env, &hash)?);
+			let sig = if low_r != 0 { secp().sign_ecdsa_low_r(&msg, &sk?) } else { secp().sign_ecdsa(&msg, &sk?) };
+			Some(sig.serialize_compact().to_vec())
+		})();
+		ret(&env, out)
+	}
+
+	/// `ArkNative.secpSchnorrSign(secret, msg, aux)`: BIP-340, 64 bytes.
+	#[unsafe(no_mangle)]
+	pub extern "system" fn Java_com_kilombino_pyblockwatch_ark_ArkNative_secpSchnorrSign<'l>(
+		env: JNIEnv<'l>, _class: JClass<'l>, secret: JByteArray<'l>, msg: JByteArray<'l>, aux: JByteArray<'l>,
+	) -> jbyteArray {
+		use bitcoin::secp256k1::{Keypair, Message};
+		let out = (|| {
+			let mut k = bytes32(&env, &secret)?;
+			let kp = Keypair::from_seckey_slice(secp(), &k).ok();
+			k.fill(0);
+			let m = Message::from_digest(bytes32(&env, &msg)?);
+			let sig = secp().sign_schnorr_with_aux_rand(&m, &kp?, &bytes32(&env, &aux)?);
+			Some(sig.serialize().to_vec())
+		})();
+		ret(&env, out)
 	}
 
 	/// `ArkNative.stop()`.
