@@ -33,6 +33,11 @@ use bitcoind_async_client::traits::{Broadcaster, Reader};
 
 use crate::daemon::tip_watcher::{TipSource, TipWatcher};
 
+
+/// Highest fee rate (sat/vB) taken from an Esplora server's estimates. The XBT mempool clears
+/// at a few sat/vB; anything above this from a server we do not run is treated as a lie.
+const ESPLORA_MAX_FEE_SAT_PER_VB: f64 = 100.0;
+
 const FEE_RATE_TARGET_CONF_FAST: u16 = 1;
 const FEE_RATE_TARGET_CONF_REGULAR: u16 = 3;
 const FEE_RATE_TARGET_CONF_SLOW: u16 = 6;
@@ -63,6 +68,7 @@ const MIN_BITCOIND_VERSION: usize = 290000;
 /// - For [ChainSourceSpec::Bitcoind], authentication must be provided (cookie file or user/pass)
 ///   and transaction history must come from txindex or the private pruned adapter.
 #[derive(Clone, Debug)]
+
 pub enum ChainSourceSpec {
 	Bitcoind {
 		/// RPC URL of the Bitcoin Core node (e.g. <http://127.0.0.1:8332>).
@@ -409,7 +415,14 @@ impl ChainSource {
 					let fee = estimates.get(&target).with_context(||
 						format!("No rate returned from get_fee_estimates for a {} confirmation target", target)
 					)?;
-					FeeRate::from_sat_per_vb_decimal_checked_ceil(*fee).with_context(||
+					// An Esplora server is not the user's own node: never take its word for a
+					// fee above this, or a lying server could make exits and offboards pay it.
+					let capped = if *fee > ESPLORA_MAX_FEE_SAT_PER_VB {
+						warn!("Esplora fee estimate {} sat/vB for target {} is above the cap; using {}",
+							fee, target, ESPLORA_MAX_FEE_SAT_PER_VB);
+						ESPLORA_MAX_FEE_SAT_PER_VB
+					} else { *fee };
+					FeeRate::from_sat_per_vb_decimal_checked_ceil(capped).with_context(||
 						format!("Invalid rate returned from get_fee_estimates {} for a {} confirmation target", fee, target)
 					)
 				};
