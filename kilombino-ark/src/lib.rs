@@ -221,15 +221,26 @@ mod jni_api {
 		mut env: JNIEnv<'l>, _class: JClass<'l>, datadir: JString<'l>, port: jint,
 		mnemonic: JString<'l>, passphrase: JString<'l>,
 	) -> jstring {
+		// A string that cannot be read is an error, never "no words" or "no passphrase": either
+		// would silently open a different (empty-looking) wallet.
+		let err = |env: &mut JNIEnv<'l>, m: &str| {
+			env.new_string(format!("ERR:{m}")).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
+		};
 		let words: Option<String> = if mnemonic.is_null() {
 			None
 		} else {
-			env.get_string(&mnemonic).ok().map(Into::into)
+			match env.get_string(&mnemonic) {
+				Ok(w) => Some(w.into()),
+				Err(e) => return err(&mut env, &format!("could not read the words: {e}")),
+			}
 		};
 		let passphrase: String = if passphrase.is_null() {
 			String::new()
 		} else {
-			env.get_string(&passphrase).map(Into::into).unwrap_or_default()
+			match env.get_string(&passphrase) {
+				Ok(p) => p.into(),
+				Err(e) => return err(&mut env, &format!("could not read the passphrase: {e}")),
+			}
 		};
 		let out = match env.get_string(&datadir) {
 			Ok(d) => {
