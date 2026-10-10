@@ -8,6 +8,11 @@ description = "Ark for Kilombino wallet (Android): runs the Paperclip/bark walle
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# kilowallet-server (home node, StartOS): the same engine as its own process.
+[[bin]]
+name = "kilombino-arkd"
+path = "src/bin/kilombino-arkd.rs"
+
 [dependencies]
 # Same wallet code as paperclip-walletd, built for a phone: Mozilla CA roots bundled
 # (no system trust store to read) and SQLite compiled in.
@@ -19,6 +24,6 @@ bitcoin.workspace = true
 bip39.workspace = true
 anyhow.workspace = true
 log.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 tokio-util.workspace = true
 jni = { version = "0.21", default-features = false }
