@@ -611,7 +611,6 @@ impl ChainSource {
 	pub async fn txs_spending_inputs<T: IntoIterator<Item = OutPoint>>(
 		&self,
 		outpoints: T,
-		#[cfg_attr(not(feature = "bitcoind-rpc"), allow(unused_variables))]
 		block_scan_start: BlockHeight,
 	) -> anyhow::Result<TxsSpendingInputsResult> {
 		let mut res = TxsSpendingInputsResult::new();
@@ -693,8 +692,16 @@ impl ChainSource {
 							let tx_status = {
 								let status = output_status.status.expect("Status should be valid if an outpoint is spent");
 								if status.confirmed {
+									let height = status.block_height.expect("Confirmed transaction missing block_height");
+									// The bitcoind path only scans from `block_scan_start`, and callers read
+									// "not found" as "spent before that, settled". Esplora answers for any
+									// depth, so a spend older than the window must be left out the same way,
+									// or an exit whose input was swept long ago never ends.
+									if BlockHeight::from(height) < block_scan_start {
+										continue;
+									}
 									TxStatus::Confirmed(BlockRef {
-										height: status.block_height.expect("Confirmed transaction missing block_height").into(),
+										height: height.into(),
 										hash: status.block_hash.expect("Confirmed transaction missing block_hash"),
 									})
 								} else {
