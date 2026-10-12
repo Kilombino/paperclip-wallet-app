@@ -409,7 +409,7 @@ impl Wallet {
 	/// is resolved against the chain and the server as it is seen and stored
 	/// accordingly. Returns a [`RecoveryReport`] (see it for why
 	/// recovered/skipped/failed matters).
-	pub(crate) async fn recover_from_mailbox(&self) -> anyhow::Result<RecoveryReport> {
+	pub async fn recover_from_mailbox(&self) -> anyhow::Result<RecoveryReport> {
 		let mut report = RecoveryReport::default();
 		let gap_limit = self.inner.config.vtxo_key_gap_limit;
 		let mut seen = HashSet::new();

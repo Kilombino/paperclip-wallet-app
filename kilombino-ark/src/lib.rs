@@ -104,6 +104,9 @@ fn create_opts(req: CreateWalletRequest) -> anyhow::Result<CreateOpts> {
 	})
 }
 
+/// A file in the datadir that asks the next [start] for a recovery-mailbox scan.
+const RESCAN_FLAG: &str = "recovery-rescan";
+
 /// Starts the wallet daemon and its REST API. Returns the bearer token to use.
 /// `mnemonic` is `None` while the app has no Ark wallet yet; `passphrase` is its optional
 /// BIP-39 passphrase ("" for none). Starting twice returns an error rather than a second daemon.
@@ -139,6 +142,20 @@ pub fn start(datadir: &Path, port: u16, mnemonic: Option<&str>, passphrase: &str
 			None => None,
 		};
 		if let Some(w) = &wallet {
+			// The app asks for a recovery scan of an existing wallet with this file: bark only
+			// runs one when it creates a wallet, so outputs of a round this wallet did not
+			// record (finished on the server after the app lost track, or made by the same
+			// words elsewhere) stay unknown otherwise. Run before the daemon, so no round of
+			// ours is in flight while the scan adopts or drops coins by the server's word.
+			let flag = datadir.join(RESCAN_FLAG);
+			if flag.exists() {
+				match w.recover_from_mailbox().await {
+					Ok(r) => info!("Recovery rescan: {} recovered, {} skipped, {} failed, {} exited, complete={}",
+						r.recovered().len(), r.skipped().len(), r.failed().len(), r.exited().len(), r.is_complete()),
+					Err(e) => warn!("Recovery rescan failed: {:#}", e),
+				}
+				let _ = std::fs::remove_file(&flag);
+			}
 			w.start_daemon()?;
 			info!("Ark wallet loaded, daemon started");
 		} else {
