@@ -347,6 +347,46 @@ mod jni_api {
 		ret(&env, out)
 	}
 
+	/// `ArkNative.secpEcdh(secret, point)`: `secret · point` as a 65-byte uncompressed point (the
+	/// raw ECDH point, not hashed: NIP-44, BIP-352 and BOLT 8 each hash it their own way).
+	#[unsafe(no_mangle)]
+	pub extern "system" fn Java_com_kilombino_pyblockwatch_ark_ArkNative_secpEcdh<'l>(
+		env: JNIEnv<'l>, _class: JClass<'l>, secret: JByteArray<'l>, point: JByteArray<'l>,
+	) -> jbyteArray {
+		use bitcoin::secp256k1::{ecdh, PublicKey, SecretKey};
+		let out = (|| {
+			let mut k = bytes32(&env, &secret)?;
+			let sk = SecretKey::from_slice(&k).ok();
+			k.fill(0);
+			let pk = PublicKey::from_slice(&env.convert_byte_array(&point).ok()?).ok()?;
+			let mut xy = ecdh::shared_secret_point(&pk, &sk?);
+			let mut p = Vec::with_capacity(65);
+			p.push(0x04);
+			p.extend_from_slice(&xy);
+			xy.fill(0);
+			Some(p)
+		})();
+		ret(&env, out)
+	}
+
+	/// `ArkNative.secpTweakAdd(secret, tweak)`: `(secret + tweak) mod n`, 32 bytes; null when the
+	/// sum is zero or either is out of range (as BIP-32 asks a child key to be skipped then).
+	#[unsafe(no_mangle)]
+	pub extern "system" fn Java_com_kilombino_pyblockwatch_ark_ArkNative_secpTweakAdd<'l>(
+		env: JNIEnv<'l>, _class: JClass<'l>, secret: JByteArray<'l>, tweak: JByteArray<'l>,
+	) -> jbyteArray {
+		use bitcoin::secp256k1::{Scalar, SecretKey};
+		let out = (|| {
+			let mut k = bytes32(&env, &secret)?;
+			let sk = SecretKey::from_slice(&k).ok();
+			k.fill(0);
+			let t = Scalar::from_be_bytes(bytes32(&env, &tweak)?).ok()?;
+			let sum = sk?.add_tweak(&t).ok()?;
+			Some(sum.secret_bytes().to_vec())
+		})();
+		ret(&env, out)
+	}
+
 	/// `ArkNative.stop()`.
 	#[unsafe(no_mangle)]
 	pub extern "system" fn Java_com_kilombino_pyblockwatch_ark_ArkNative_stop<'l>(
