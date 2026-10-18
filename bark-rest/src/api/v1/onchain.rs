@@ -21,7 +21,7 @@ fn cast_bdk(w: &dyn OnchainWalletTrait) -> anyhow::Result<&OnchainWallet> {
 }
 
 /// Cast a mutable [OnchainWalletTrait] to an [OnchainWallet]
-fn cast_bdk_mut(w: &mut dyn OnchainWalletTrait) -> anyhow::Result<&mut OnchainWallet> {
+pub(crate) fn cast_bdk_mut(w: &mut dyn OnchainWalletTrait) -> anyhow::Result<&mut OnchainWallet> {
 	(w as &mut dyn std::any::Any).downcast_mut::<OnchainWallet>()
 		.context("onchain wallet is not a BDK wallet")
 }
