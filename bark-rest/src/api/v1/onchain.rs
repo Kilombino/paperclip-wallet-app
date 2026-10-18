@@ -26,6 +26,14 @@ pub(crate) fn cast_bdk_mut(w: &mut dyn OnchainWalletTrait) -> anyhow::Result<&mu
 		.context("onchain wallet is not a BDK wallet")
 }
 
+/// The fee rate a send asked for, or the wallet's regular estimate when it did not.
+async fn chosen_fee_rate(wallet: &bark::Wallet, sat_per_vb: Option<f64>) -> HandlerResult<bitcoin::FeeRate> {
+	Ok(match crate::api::v1::boards::board_fee_rate(sat_per_vb)? {
+		Some(r) => r,
+		None => wallet.chain().fee_rates().await.regular,
+	})
+}
+
 pub fn router() -> Router<Arc<ServerState>> {
 	Router::new()
 		.route("/message/sign", post(onchain_message_sign))
@@ -204,7 +212,7 @@ pub async fn onchain_send(
 		.require_network(net)
 		.badarg("Address is not valid for configured network")?;
 
-	let fee_rate = wallet.chain().fee_rates().await.regular;
+	let fee_rate = chosen_fee_rate(&wallet, body.fee_rate_sat_per_vb).await?;
 	let amount = Amount::from_sat(body.amount_sat);
 	let txid = cast_bdk_mut(&mut *onchain.write().await)?.send(wallet.chain(), addr, amount, fee_rate).await
 		.context("Failed to send onchain payment")?;
@@ -250,7 +258,7 @@ pub async fn onchain_send_selected_estimate(
 	let wallet = state.require_wallet()?;
 	let onchain = state.require_onchain()?;
 	let (outpoints, addr, amount) = selected_parts(&wallet, &body).await?;
-	let fee_rate = wallet.chain().fee_rates().await.regular;
+	let fee_rate = chosen_fee_rate(&wallet, body.fee_rate_sat_per_vb).await?;
 	let dest_spk = addr.script_pubkey();
 	let psbt = cast_bdk_mut(&mut *onchain.write().await)?
 		.prepare_selected_tx(&outpoints, addr, amount, fee_rate)
@@ -287,7 +295,7 @@ pub async fn onchain_send_selected(
 	let wallet = state.require_wallet()?;
 	let onchain = state.require_onchain()?;
 	let (outpoints, addr, amount) = selected_parts(&wallet, &body).await?;
-	let fee_rate = wallet.chain().fee_rates().await.regular;
+	let fee_rate = chosen_fee_rate(&wallet, body.fee_rate_sat_per_vb).await?;
 	let txid = cast_bdk_mut(&mut *onchain.write().await)?
 		.send_selected(wallet.chain(), &outpoints, addr, amount, fee_rate).await
 		.context("Failed to send from the selected coins")?;
@@ -383,7 +391,7 @@ pub async fn onchain_drain(
 		.require_network(net)
 		.badarg("Address is not valid for configured network")?;
 
-	let fee_rate = wallet.chain().fee_rates().await.regular;
+	let fee_rate = chosen_fee_rate(&wallet, body.fee_rate_sat_per_vb).await?;
 	let txid = cast_bdk_mut(&mut *onchain.write().await)?.drain(wallet.chain(), addr, fee_rate).await
 		.context("Failed to drain onchain wallet")?;
 

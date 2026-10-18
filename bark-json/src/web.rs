@@ -654,6 +654,9 @@ pub struct OnchainSendRequest {
 	pub destination: String,
 	/// The amount to send (in satoshis)
 	pub amount_sat: u64,
+	/// The fee rate in sat/vB; the wallet's regular estimate when left out
+	#[serde(default)]
+	pub fee_rate_sat_per_vb: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -676,6 +679,9 @@ pub struct OnchainSendSelectedRequest {
 	pub amount_sat: Option<u64>,
 	/// The coins to spend, as "txid:vout"
 	pub outpoints: Vec<String>,
+	/// The fee rate in sat/vB; the wallet's regular estimate when left out
+	#[serde(default)]
+	pub fee_rate_sat_per_vb: Option<f64>,
 }
 
 /// The cost of a coin-control send, before it is made.
@@ -694,6 +700,9 @@ pub struct OnchainSendSelectedEstimate {
 pub struct OnchainDrainRequest {
 	/// The destination Bitcoin address
 	pub destination: String,
+	/// The fee rate in sat/vB; the wallet's regular estimate when left out
+	#[serde(default)]
+	pub fee_rate_sat_per_vb: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]

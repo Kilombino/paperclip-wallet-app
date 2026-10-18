@@ -149,7 +149,7 @@ pub async fn board_amount(
 
 /// The funding fee rate a board request asked for, if any. Below the 0.1 sat/vB relay floor
 /// the funding transaction would never propagate, so refuse it up front.
-fn board_fee_rate(sat_per_vb: Option<f64>) -> HandlerResult<Option<FeeRate>> {
+pub(crate) fn board_fee_rate(sat_per_vb: Option<f64>) -> HandlerResult<Option<FeeRate>> {
 	let Some(v) = sat_per_vb else { return Ok(None) };
 	if !(0.1..=10_000.0).contains(&v) {
 		badarg!("Fee rate must be between 0.1 and 10000 sat/vB");
