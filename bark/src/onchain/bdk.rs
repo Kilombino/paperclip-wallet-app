@@ -462,6 +462,45 @@ impl OnchainWallet {
 		b.finish().context("error building tx from the selected coins")
 	}
 
+	/// Speeds up an unconfirmed transaction of this wallet (child pays for parent): a child that
+	/// spends every output of `parent` this wallet holds back to itself, paying enough that the
+	/// two together reach `target`. Returns the child's txid and its fee.
+	pub async fn cpfp(
+		&mut self,
+		chain: &ChainSource,
+		parent: Txid,
+		target: FeeRate,
+	) -> anyhow::Result<(Txid, Amount)> {
+		let wtx = self.inner.get_tx(parent).context("this wallet does not know that transaction")?;
+		ensure!(!wtx.chain_position.is_confirmed(), "the transaction is already confirmed");
+		let tx = wtx.tx_node.tx.clone();
+		let parent_fee = self.inner.calculate_fee(&tx).context("the transaction's fee is not known to this wallet")?;
+		let parent_vsize = tx.vsize() as u64;
+		let ours: Vec<LocalOutput> = self.list_unspent().into_iter().filter(|o| o.outpoint.txid == parent).collect();
+		ensure!(!ours.is_empty(), "this wallet holds no unspent output of that transaction");
+		let input_value = ours.iter().map(|o| o.txout.value).sum::<Amount>();
+		// Taproot key-path inputs (57.5 vB each), one Taproot output, the transaction's overhead.
+		let child_vsize = (105 + 230 * ours.len() as u64 + 172 + 3) / 4;
+		let total = target.to_sat_per_vb_ceil() * (parent_vsize + child_vsize);
+		let child_fee = Amount::from_sat(total.saturating_sub(parent_fee.to_sat())
+			.max(target.to_sat_per_vb_ceil() * child_vsize));
+		ensure!(child_fee * 2 < input_value, "that fee would take too much of the coins");
+		let dest = self.inner.reveal_next_address(KeychainKind::External).address;
+		let mut b = self.inner.build_tx();
+		b.add_utxos(&ours.iter().map(|o| o.outpoint).collect::<Vec<_>>()).context("an output of the transaction is not spendable")?;
+		b.manually_selected_only();
+		b.drain_to(dest.script_pubkey());
+		b.fee_absolute(child_fee);
+		let psbt = b.finish().context("error building the child transaction")?;
+		let child = self.sign_psbt(psbt).await?.extract_tx()?;
+		let txid = child.compute_txid();
+		self.record_broadcast_tx(child.clone()).await?;
+		if let Err(e) = chain.broadcast_tx(&child).await {
+			warn!("broadcast for {txid} returned error, will retry on next sync: {e:#}");
+		}
+		Ok((txid, child_fee))
+	}
+
 	/// Sign and broadcast a [Self::prepare_selected_tx] transaction.
 	pub async fn send_selected(
 		&mut self,

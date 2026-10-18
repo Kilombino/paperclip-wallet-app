@@ -44,6 +44,7 @@ pub fn router() -> Router<Arc<ServerState>> {
 		.route("/send-many", post(onchain_send_many))
 		.route("/drain", post(onchain_drain))
 		.route("/send-selected", post(onchain_send_selected))
+		.route("/cpfp", post(onchain_cpfp))
 		.route("/send-selected/estimate", post(onchain_send_selected_estimate))
 		.route("/utxos", get(onchain_utxos))
 		.route("/transactions", get(onchain_transactions))
@@ -218,6 +219,29 @@ pub async fn onchain_send(
 		.context("Failed to send onchain payment")?;
 
 	Ok(axum::Json(bark_json::cli::onchain::Send { txid }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct CpfpRequest {
+	pub txid: String,
+	pub fee_rate_sat_per_vb: f64,
+}
+
+/// Speeds up an unconfirmed transaction of the on-chain wallet with a child that pays for
+/// both (CPFP), so the two together reach the fee rate asked for.
+#[debug_handler]
+pub async fn onchain_cpfp(
+	State(state): State<Arc<ServerState>>,
+	Json(body): Json<CpfpRequest>,
+) -> HandlerResult<Json<serde_json::Value>> {
+	let wallet = state.require_wallet()?;
+	let onchain = state.require_onchain()?;
+	let parent = bitcoin::Txid::from_str(&body.txid).badarg("Invalid txid")?;
+	let rate = chosen_fee_rate(&wallet, Some(body.fee_rate_sat_per_vb)).await?;
+	let (txid, fee) = cast_bdk_mut(&mut *onchain.write().await)?
+		.cpfp(wallet.chain(), parent, rate).await
+		.badarg("Cannot speed up this transaction")?;
+	Ok(Json(serde_json::json!({ "txid": txid.to_string(), "fee_sat": fee.to_sat() })))
 }
 
 /// Parse a coin-control request into (coins, destination, amount).
