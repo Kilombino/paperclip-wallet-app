@@ -338,7 +338,18 @@ fn wallet_create_request_to_create_opts(req: CreateWalletRequest) -> anyhow::Res
 	};
 
 	if let Some(chain_source) = req.chain_source {
+		let chain_source = match chain_source {
+			ChainSourceConfig::Platform => {
+				let path = std::env::var("PAPERCLIP_PLATFORM_CONNECTION")
+					.context("No installed node connection is configured; use manual setup")?;
+				let bytes = std::fs::read(path).context("Installed node connection is not ready")?;
+				serde_json::from_slice::<ChainSourceConfig>(&bytes)
+					.context("Invalid installed node connection")?
+			},
+			other => other,
+		};
 		match chain_source {
+			ChainSourceConfig::Platform => anyhow::bail!("Invalid recursive installed node connection"),
 			ChainSourceConfig::Esplora { url } => {
 				config.esplora = Some(url);
 			},

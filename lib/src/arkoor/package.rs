@@ -728,6 +728,58 @@ mod test {
 	}
 
 	#[test]
+	fn economical_payment_preserves_ancestors_and_relay_floor() {
+		let budget = crate::exit_policy::economical_transfer_funding();
+		for (payment, expected_cost) in [(10_000, 1584), (98_944, 1056)] {
+			let (funding, input) = funded_test_input(Amount::from_sat(100_000));
+			let original = input.clone();
+			let (builder, cost) = ArkoorPackageBuilder::new_funded_payment_with_funding(
+				vec![input], ArkoorDestination { total_amount: Amount::from_sat(payment),
+					policy: VtxoPolicy::new_pubkey(bob_public_key()) },
+				VtxoPolicy::new_pubkey(alice_public_key()), budget,
+			).unwrap();
+			assert_eq!(cost.to_sat(), expected_cost);
+			let outputs = builder.cosign_both(&[alice_keypair()], &server_keypair())
+				.unwrap().build_signed_vtxos();
+			assert_eq!(outputs.iter().map(|v| v.amount()).sum::<Amount>() + cost, Amount::from_sat(100_000));
+			for output in outputs {
+				crate::exit_policy::paperclip_policy().check(&output, &funding, BlockHeight::new(100)).unwrap();
+				for previous in original.transactions() { assert!(output.transactions().any(|tx| tx.tx == previous.tx)); }
+				for tx in output.transactions() {
+					let fee = output.exit_transaction_fee(tx.tx.compute_txid()).unwrap();
+					assert!(fee.to_sat() >= tx.tx.vsize() as u64);
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn economical_payment_rejects_oversized_fanout_and_missing_checkpoint() {
+		let budget = crate::exit_policy::economical_transfer_funding();
+		let (_, input) = funded_test_input(Amount::from_sat(100_000));
+		let destination = |amount| ArkoorDestination { total_amount: Amount::from_sat(amount),
+			policy: VtxoPolicy::new_pubkey(bob_public_key()) };
+		assert!(ArkoorBuilder::new_funded(input.clone(),
+			vec![destination(30_000), destination(30_000), destination(37_680)], true, budget).is_err());
+		assert!(ArkoorBuilder::new_funded(input, vec![destination(99_420)], false, budget).is_err());
+		assert!(crate::tree::signed::TreeExitFunding::new(Amount::from_sat(330), Amount::from_sat(250)).is_err(),
+			"ordinary transfer exception must not relax legacy tree construction");
+	}
+
+	#[test]
+	fn p2a_cannot_replace_a_signed_standard_ancestor() {
+		let (_, input) = funded_test_input(Amount::from_sat(100_000));
+		let original = input.clone();
+		let p2a = crate::exit_policy::economical_transfer_funding()
+			.with_format(bitcoin_ext::fee::ExitFormat::LegacyV3);
+		let result = ArkoorBuilder::new_funded(input,
+			vec![ArkoorDestination { total_amount: Amount::from_sat(98_944),
+				policy: VtxoPolicy::new_pubkey(bob_public_key()) }], true, p2a);
+		assert!(matches!(result, Err(ArkoorConstructionError::IncompatibleExitFunding)));
+		assert!(original.transactions().all(|item| item.tx.version == bitcoin::transaction::Version::TWO));
+	}
+
+	#[test]
 	fn funded_payment_reserve_depends_on_outputs_and_input_count() {
 		let (_, first) = funded_test_input(Amount::from_sat(20_000));
 		let (_, second) = funded_test_input(Amount::from_sat(30_000));

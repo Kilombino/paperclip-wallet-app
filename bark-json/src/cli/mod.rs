@@ -33,6 +33,7 @@ pub struct ArkInfo {
 	pub funded_lightning: bool,
 	#[serde(default)]
 	pub small_anchor_transfers: bool,
+	pub economical_transfers: bool,
 	/// The bitcoin network the server operates on
 	#[cfg_attr(feature = "utoipa", schema(value_type = String))]
 	pub network: bitcoin::Network,
@@ -114,6 +115,8 @@ impl<'de> serde::Deserialize<'de> for ArkInfo {
 			funded_lightning: bool,
 		#[serde(default)]
 		small_anchor_transfers: bool,
+		#[serde(default)]
+		economical_transfers: bool,
 			network: bitcoin::Network,
 			server_pubkey: PublicKey,
 			mailbox_pubkey: PublicKey,
@@ -155,6 +158,7 @@ impl<'de> serde::Deserialize<'de> for ArkInfo {
 			exit_profile: v.exit_profile,
 		funded_lightning: v.funded_lightning,
 		small_anchor_transfers: v.small_anchor_transfers,
+		economical_transfers: v.economical_transfers,
 			network: v.network,
 			server_pubkey: v.server_pubkey,
 			mailbox_pubkey: v.mailbox_pubkey,
@@ -194,6 +198,7 @@ impl<T: Borrow<ark::ArkInfo>> From<T> for ArkInfo {
 			exit_profile: v.exit_profile,
 		funded_lightning: v.funded_lightning,
 		small_anchor_transfers: v.small_anchor_transfers,
+		economical_transfers: v.economical_transfers,
 			network: v.network,
 			server_pubkey: v.server_pubkey,
 			mailbox_pubkey: v.mailbox_pubkey,
@@ -787,6 +792,7 @@ mod test {
 			exit_profile: ark::exit_policy::PAPERCLIP_EXIT_PROFILE,
 			funded_lightning: false,
 			small_anchor_transfers: false,
+			economical_transfers: false,
 			network: bitcoin::Network::Regtest,
 			server_pubkey: pubkey,
 			mailbox_pubkey: pubkey,
@@ -860,6 +866,7 @@ mod test {
 				exit_profile: ark::exit_policy::PAPERCLIP_EXIT_PROFILE,
 			funded_lightning: false,
 			small_anchor_transfers: false,
+			economical_transfers: false,
 				network: j.network,
 				server_pubkey: j.server_pubkey,
 				mailbox_pubkey: j.mailbox_pubkey,

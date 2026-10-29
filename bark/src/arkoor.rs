@@ -225,6 +225,7 @@ impl Wallet {
 		change_keypair: Keypair,
 		change_pieces: Option<Vec<Amount>>,
 		small_anchor_transfer: bool,
+		economical_transfer: bool,
 	) -> Result<ArkoorCreateResult, ArkoorCreateError> {
 		let (mut srv, _) = self.require_server().await?;
 		let input_ids = inputs.into_iter().map(|v| v.id()).collect::<Vec<_>>();
@@ -267,7 +268,8 @@ impl Wallet {
 		// The profile fixes the output allocation. Older split-piece hints cannot
 		// change recipient amounts or create dust recovery outputs.
 		let _ = change_pieces;
-		let funding = if small_anchor_transfer { ark::exit_policy::small_anchor_transfer_funding() }
+		let funding = if economical_transfer { ark::exit_policy::economical_transfer_funding() }
+			else if small_anchor_transfer { ark::exit_policy::small_anchor_transfer_funding() }
 			else { ark::exit_policy::paperclip_funding() };
 		let (builder, recovery_reserve) = ArkoorPackageBuilder::new_funded_payment_with_funding(
 			inputs, arkoor_dest.clone(), VtxoPolicy::new_pubkey(change_pubkey), funding,
@@ -345,15 +347,17 @@ impl Wallet {
 	}
 
 	/// Read-only plan shared by estimates and sends. No keys, locks or signatures are created.
-	/// Returns the inputs, the recovery reserve and whether the server's smaller transfer
-	/// anchors are used.
+	/// Returns the inputs, the recovery reserve and whether the server's smaller transfer anchors
+	/// and its economical transfers are used.
 	pub(crate) async fn plan_arkoor_payment(
 		&self, amount: Amount, policy: VtxoPolicy, change: PublicKey, chosen: Option<&[VtxoId]>,
-	) -> anyhow::Result<(Vec<WalletVtxo>, Amount, bool)> {
+	) -> anyhow::Result<(Vec<WalletVtxo>, Amount, bool, bool)> {
 		self.inner.chain.require_funded_policy().await?;
 		let (_, info) = self.require_server().await?;
 		let small_anchor_transfer = info.small_anchor_transfers;
-		let funding = if small_anchor_transfer { ark::exit_policy::small_anchor_transfer_funding() }
+		let economical_transfer = info.economical_transfers;
+		let funding = if economical_transfer { ark::exit_policy::economical_transfer_funding() }
+			else if small_anchor_transfer { ark::exit_policy::small_anchor_transfer_funding() }
 			else { ark::exit_policy::paperclip_funding() };
 		ensure!(amount > Amount::ZERO, "payment amount must be positive");
 		let tip = self.inner.chain.tip().await?;
@@ -383,7 +387,7 @@ impl Wallet {
 			let (inputs, reserve) = self.check_arkoor_inputs(inputs, amount, policy, change, tip, funding).await
 				.with_context(|| format!("the chosen VTXOs hold {}: spend them whole (amount {}) or leave \
 					a change of at least 1330 sats after 3 reserves per coin", total, total - minimum + amount))?;
-			return Ok((inputs, reserve, small_anchor_transfer));
+			return Ok((inputs, reserve, small_anchor_transfer, economical_transfer));
 		}
 		// Automatic selection: the cheapest constructible single coin, then bounded
 		// combinations, priced by the funded package itself.
@@ -405,7 +409,7 @@ impl Wallet {
 			}
 		})?;
 		let (inputs, reserve) = self.check_arkoor_inputs(inputs, amount, policy, change, tip, funding).await?;
-		Ok((inputs, reserve, small_anchor_transfer))
+		Ok((inputs, reserve, small_anchor_transfer, economical_transfer))
 	}
 
 	async fn check_arkoor_inputs(

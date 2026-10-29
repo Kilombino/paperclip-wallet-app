@@ -131,7 +131,9 @@ message ArkInfo {
 
 	bool small_anchor_transfers = 25;
 
-	// last index: 25
+	bool economical_transfers = 26;
+
+	// last index: 26
 }
 
 message OffboardFeeRateResponse {

@@ -2,7 +2,7 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 USER root
-COPY deployment/pruned_rpc.py deployment/managed-chain.py /usr/local/lib/paperclip/
+COPY deployment/pruned_rpc.py deployment/managed-chain.py deployment/platform_node.py /usr/local/lib/paperclip/
 COPY deployment/startos-entrypoint.py /usr/local/lib/paperclip/
 USER 1000:1000
 ENTRYPOINT ["/usr/bin/tini", "--", "python3", "/usr/local/lib/paperclip/managed-chain.py", "run"]

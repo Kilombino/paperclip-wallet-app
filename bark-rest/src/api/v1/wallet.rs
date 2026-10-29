@@ -33,6 +33,7 @@ pub fn router() -> Router<Arc<ServerState>> {
 		.route("/connected", get(connected))
 		.route("/identity", get(identity))
 		.route("/create", post(create_wallet))
+		.route("/platform-node", get(platform_node))
 		.route("/mnemonic", get(mnemonic))
 		.route("/ark-info", get(ark_info))
 		.route("/next-round", get(next_round))
@@ -276,6 +277,13 @@ pub async fn create_wallet(
 	} else {
 		badarg!("No wallet creation hook set");
 	}
+}
+
+/// Return availability only; RPC credentials stay on the server.
+async fn platform_node() -> Json<serde_json::Value> {
+	let available = std::env::var("PAPERCLIP_PLATFORM_CONNECTION")
+		.ok().is_some_and(|path| std::path::Path::new(&path).is_file());
+	Json(serde_json::json!({"available": available}))
 }
 
 #[utoipa::path(

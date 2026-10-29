@@ -4,11 +4,12 @@ let network = null;
 let uncertainMutation = sessionRead('paperclip.uncertain') === '1';
 let lightningEnabled = false;
 let setupPending = false;
+let setupDefaultsLoaded = false;
 const $ = id => document.getElementById(id);
 const status = text => { $('status').textContent = text; };
-async function api(path, body, method) {
-  const response = await fetch('/api/v1/' + path, {
-    method: method || (body === undefined ? 'GET' : 'POST'), cache: 'no-store', redirect: 'error',
+async function api(path, body, method, signal) {
+  const response = await fetch(path.startsWith('/') ? path : '/api/v1/' + path, {
+    signal, method: method || (body === undefined ? 'GET' : 'POST'), cache: 'no-store', redirect: 'error',
     headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
     ...(body === undefined ? {} : {body: JSON.stringify(body)})
   });
@@ -67,6 +68,22 @@ $('unlock').addEventListener('submit', event => { event.preventDefault(); run(ev
     setupPending = false;
     if (existing.fingerprint === null) {
       $('login').hidden = true; $('setup').hidden = false;
+      if (!setupDefaultsLoaded) {
+        const defaults = await api('/api/config').catch(() => null);
+        if (typeof defaults?.arkServer === 'string') {
+          try {
+            const url = new URL(defaults.arkServer);
+            if (['https:', 'http:'].includes(url.protocol) && !url.username && !url.password) {
+              $('setup-asp').value = defaults.arkServer;
+            }
+          } catch {}
+        }
+        setupDefaultsLoaded = true;
+      }
+      const installed = await api('wallet/platform-node').catch(() => ({available: false}));
+      $('setup-installed').disabled = !installed.available;
+      $('setup-backend').value = installed.available ? 'installed' : 'manual';
+      setupBackend();
       status('Choose your XBT backend and ASP to create a wallet.');
       return;
     }
@@ -81,19 +98,30 @@ function endpoint(id, protocols) {
   }
   return value;
 }
+function setupBackend() {
+  const manual = $('setup-backend').value === 'manual';
+  $('setup-network').disabled = !manual;
+  if (!manual) $('setup-network').value = 'mainnet';
+  $('show-rpc-password').hidden = !manual;
+  for (const id of ['setup-rpc', 'setup-user', 'setup-password']) {
+    $(id).disabled = !manual;
+    $(id).closest('label').hidden = !manual;
+  }
+}
+$('setup-backend').onchange = setupBackend;
 $('create-wallet').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
   if (!token || setupPending) throw new Error('Lock and unlock to check whether the previous setup completed before retrying.');
   const selected = $('setup-network').value;
   if (!['mainnet', 'regtest'].includes(selected) || !$('setup-ack').checked) throw new Error('Choose the network and confirm the backup requirement.');
   const body = {
     network: selected, ark_server: endpoint('setup-asp', ['http:', 'https:']),
-    chain_source: {bitcoind: {
+    chain_source: $('setup-backend').value === 'installed' ? 'platform' : {bitcoind: {
       bitcoind: endpoint('setup-rpc', ['http:', 'https:']),
       bitcoind_auth: {'user-pass': {user: $('setup-user').value, pass: $('setup-password').value}}
     }}, force: false
   };
-  if (!body.chain_source.bitcoind.bitcoind_auth['user-pass'].user || !body.chain_source.bitcoind.bitcoind_auth['user-pass'].pass) throw new Error('RPC credentials are required.');
-  if (!confirm('Create a new wallet on XBT ' + selected + '? For an existing wallet, cancel and restore its complete backup instead.')) return;
+  if (body.chain_source !== 'platform' && (!body.chain_source.bitcoind.bitcoind_auth['user-pass'].user || !body.chain_source.bitcoind.bitcoind_auth['user-pass'].pass)) throw new Error('RPC credentials are required.');
+  if (!await PaperclipReview.ask('Create a new wallet on XBT ' + selected + '? For an existing wallet, cancel and restore its complete backup instead.')) return;
   setupPending = true;
   $('setup-password').value = '';
   await api('wallet/create', body);
@@ -131,16 +159,17 @@ $('send').addEventListener('submit', event => { event.preventDefault(); run(even
     'Estimated remaining balance: ' + quote.remaining_spendable_sat.toLocaleString() + ' sats';
   $('ark-estimate-values').textContent = review;
   $('ark-estimate').hidden = false;
-  if (!confirm(review + '\n\nRecovery allocations are not separately refundable. They are not miner fees unless recovery transactions confirm. Refresh does not refund prior allocations.\n\nSend to:\n' + destination + '?')) {
+  if (!await PaperclipReview.ask(review + '\n\nRecovery allocations are not separately refundable. They are not miner fees unless recovery transactions confirm. Refresh does not refund prior allocations.\n\nSend to:\n' + destination + '?')) {
     status('Estimate ready. No payment was sent.'); return;
   }
+  if (token !== sessionToken || !network || $('destination').value.trim() !== destination || Number($('amount').value) !== amount) throw new Error('Payment details changed. Review again.');
   status('Submitting once. If the connection fails, check history before trying again.');
   await mutate('wallet/send', {destination, amount_sat: amount, max_total_sat: quote.total_debit_sat});
   $('destination').value = ''; $('amount').value = ''; $('ark-estimate').hidden = true; await update(); status('Transfer completed.');
 }); });
 for (const id of ['destination', 'amount']) $(id).addEventListener('input', () => { $('ark-estimate').hidden = true; });
 $('refresh').onclick = event => run(event.target, async () => {
-  if (!confirm('Refresh all eligible VTXOs? Transaction fees may apply.')) return;
+  if (!await PaperclipReview.ask('Refresh all eligible VTXOs? Transaction fees may apply.')) return;
   await mutate('wallet/refresh/all', {}); await update(); status('Refresh requested. Wait for confirmation and update to check completion.');
 });
 
@@ -167,7 +196,7 @@ function sats(id, optional = false) {
 $('chain-send').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
   const destination = $('chain-destination').value.trim(), amount = sats('chain-amount');
   if (!destination) throw new Error('Enter an XBT address.');
-  if (!confirm('Send ' + amount.toLocaleString() + ' sats on ' + network + ' to:\n' + destination + '\n\nMiner fees are additional.')) return;
+  if (!await PaperclipReview.ask('Send ' + amount.toLocaleString() + ' sats on ' + network + ' to:\n' + destination + '\n\nMiner fees are additional.')) return;
   const result = await mutate('onchain/send', {destination, amount_sat: amount});
   $('chain-result').textContent = result.txid;
   $('chain-destination').value = ''; $('chain-amount').value = '';
@@ -185,8 +214,10 @@ $('ln-pay').onsubmit = event => { event.preventDefault(); run(event.submitter, a
     costs = 'Estimated total: ' + quote.gross_amount_sat.toLocaleString() + ' sats\nIncludes ' + quote.fee_sat.toLocaleString() + ' sats in service fees and recovery reserves.\nEstimate may change if wallet funds or server fees change.';
   }
   if (!token || token !== paymentSession || $('wallet').hidden || destination !== $('ln-destination').value.trim() || amount !== sats('ln-amount', true)) throw new Error('Payment details changed. Review them again. No payment was sent.');
-  if (!confirm('Pay ' + (amount === null ? 'the invoice amount' : amount.toLocaleString() + ' sats') + ' from Ark on ' + network + '?\n' + destination + '\n\n' + costs + '\nFailed payments may also consume refund reserves.')) return;
+  if (!await PaperclipReview.ask('Pay ' + (amount === null ? 'the invoice amount' : amount.toLocaleString() + ' sats') + ' from Ark on ' + network + '?\n' + destination + '\n\n' + costs + '\nFailed payments may also consume refund reserves.')) return;
+  if (!token || token !== paymentSession || destination !== $('ln-destination').value.trim() || amount !== sats('ln-amount', true)) throw new Error('Payment details changed. Review again.');
   const result = await mutate('lightning/pay', {destination, amount_sat: amount, comment: null});
+  if (!token || token !== paymentSession || $('wallet').hidden) return;
   $('ln-result').textContent = JSON.stringify(result, null, 2);
   paymentSummary('Submitted', 'Payment submitted once. Check Sent status before trying again.');
   if (result.payment_hash) { $('ln-identifier').value = result.payment_hash; $('ln-direction').value = 'sends'; }
@@ -210,10 +241,13 @@ $('ln-receive').onsubmit = event => { event.preventDefault(); run(event.submitte
 $('ln-check').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
   const identifier = $('ln-identifier').value.trim(), direction = $('ln-direction').value;
   if (!identifier || !['sends', 'receives'].includes(direction)) throw new Error('Choose a payment and direction.');
+  const checkedSession = token;
   const result = await api('lightning/' + direction + '/' + encodeURIComponent(identifier));
+  if (!token || token !== checkedSession || $('wallet').hidden || identifier !== $('ln-identifier').value.trim() || direction !== $('ln-direction').value) return;
   $('ln-result').textContent = JSON.stringify(result, null, 2);
   const state = typeof result.state === 'string' ? result.state : 'See details';
-  paymentSummary(state, state === 'unknown' ? 'No outgoing payment is recorded for this identifier. Checking status does not pay an invoice.' : 'Status from your wallet. Review the details before submitting any further payment.');
+  const descriptions = {pending: 'Payment is still in progress. Do not send it again.', succeeded: 'Your wallet reports this payment completed.', completed: 'Your wallet reports this payment completed.', failed: 'Payment failed. Check any refund or recovery status before retrying.', expired: 'The invoice expired. Check activity for a payment or refund before creating another.', unknown: 'The payment outcome is not confirmed. Check activity and the recipient before retrying.'};
+  paymentSummary(state, descriptions[state] || 'Status from your wallet. Check the technical details before retrying; an unfamiliar status does not mean payment failed.');
   status('Payment status updated.');
 }); };
 $('history-load').onclick = event => run(event.target, async () => {
@@ -243,23 +277,23 @@ $('deposit').onclick = event => run(event.target, async () => {
 $('board').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
   const amount = Number($('board-amount').value);
   if (!Number.isSafeInteger(amount) || amount < 20000) throw new Error('Enter at least 20,000 whole sats.');
-  if (!confirm('Board ' + amount.toLocaleString() + ' sats on ' + network + '? Recovery reserves and miner fees apply.')) return;
+  if (!await PaperclipReview.ask('Board ' + amount.toLocaleString() + ' sats on ' + network + '? Recovery reserves and miner fees apply.')) return;
   await mutate('boards/board-amount', {amount_sat: amount}); await update();
   status('Board submitted. Wait for confirmations; do not submit again.');
 }); };
 $('withdraw').onclick = event => run(event.target, async () => {
-  if (!confirm('Withdraw all Ark funds to your on-chain wallet? Fees apply.')) return;
+  if (!await PaperclipReview.ask('Withdraw all Ark funds to your on-chain wallet? Fees apply.')) return;
   await mutate('wallet/offboard/all', {}); await update(); status('Withdrawal submitted.');
 });
 $('exit-start').onclick = event => run(event.target, async () => {
-  if (!confirm('Start emergency recovery of all Ark funds? This requires on-chain fees and a timelock. Continue only after backing up your complete wallet.')) return;
+  if (!await PaperclipReview.ask('Start emergency recovery of all Ark funds? This requires on-chain fees and a timelock. Continue only after backing up your complete wallet.')) return;
   await mutate('exits/start/all', {}); await update(); status('Exit started. Progress recovery until funds are claimable.');
 });
 $('exit-progress').onclick = event => run(event.target, async () => {
   await mutate('exits/progress', {wait: false}); await update(); status('Recovery progress updated.');
 });
 $('exit-claim').onclick = event => run(event.target, async () => {
-  if (!confirm('Claim all matured exits to your on-chain wallet? Miner fees apply.')) return;
+  if (!await PaperclipReview.ask('Claim all matured exits to your on-chain wallet? Miner fees apply.')) return;
   const address = await api('onchain/addresses/next', {});
   await mutate('exits/claim/all', {destination: address.address}); await update(); status('Claim submitted. Wait for confirmation.');
 });
@@ -286,7 +320,15 @@ function renderActivity(records) {
     const detail = document.createElement('p');
     const date = new Date(row.time?.created_at);
     detail.textContent = (row.status || 'Unknown') + ' \u00b7 ' + (Number.isFinite(date.getTime()) ? date.toLocaleString() : 'Time unavailable') + ' \u00b7 Fee: ' + (Number.isSafeInteger(row.offchain_fee_sat) ? row.offchain_fee_sat.toLocaleString() + ' sats' : 'unavailable');
-    card.append(heading, value, detail); list.append(card);
+    const badge = document.createElement('span'); badge.className = 'activity-state';
+    badge.textContent = ({successful: 'Completed', pending: 'Pending', failed: 'Failed'}[row.status] || row.status || 'Status unavailable');
+    const more = document.createElement('details');
+    const summary = document.createElement('summary'); summary.textContent = 'Payment details';
+    const explanation = document.createElement('p');
+    explanation.textContent = row.status === 'pending' ? 'Still in progress. Check the result before attempting another payment.' : row.status === 'failed' ? 'This operation failed. Check any related refund or recovery before retrying.' : 'Balance change includes the effect recorded by your wallet. Fee information is shown above.';
+    const record = document.createElement('pre'); record.textContent = JSON.stringify(row, null, 2);
+    more.append(summary, explanation, record);
+    card.append(heading, value, badge, detail, more); list.append(card);
   }
 }
 const reviewLock = $('lock').onclick;
@@ -304,8 +346,8 @@ const sessionLock = $('lock').onclick;
 $('lock').onclick = () => { sessionWrite('paperclip.session', null); sessionLock(); $('token').type = 'password'; $('show-token').textContent = 'Show password'; $('show-token').setAttribute('aria-pressed', 'false'); };
 const sessionSetupLock = $('setup-lock').onclick;
 $('setup-lock').onclick = () => { sessionWrite('paperclip.session', null); sessionSetupLock(); };
-$('submission-reviewed').onclick = () => {
-  if (!confirm('Have you checked Activity and the payment status? Continue only after resolving the previous submission. A pending payment must not be sent again.')) return;
+$('submission-reviewed').onclick = async () => {
+  if (!await PaperclipReview.ask('Have you checked Activity and the payment status? Continue only after resolving the previous submission. A pending payment must not be sent again.')) return;
   uncertainMutation = false; sessionWrite('paperclip.uncertain', null); $('submission-warning').hidden = true;
   status('Previous result acknowledged. No payment has been resubmitted.');
 };
@@ -388,7 +430,7 @@ $('message-verify-signature').oninput = () => { $('message-verification').textCo
 $('onchain-message').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
   clearMessageProof();
   const input = messageInput(), session = token;
-  if (!confirm('Sign this exact message for ' + input.address + '?\n\n' + input.message + '\n\nThis proves address ownership. No funds will move.')) return;
+  if (!await PaperclipReview.ask('Sign this exact message for ' + input.address + '?\n\n' + input.message + '\n\nThis proves address ownership. No funds will move.')) return;
   const proof = await api('onchain/message/sign', input);
   if (!token || token !== session || JSON.stringify(input) !== JSON.stringify(messageInput())) return;
   if (proof.scheme !== 'bip322-simple' || proof.message !== input.message || proof.address?.toLowerCase() !== input.address.toLowerCase() || typeof proof.signature !== 'string' || !proof.signature.startsWith('smp')) throw new Error('Unexpected message proof response.');
@@ -426,7 +468,7 @@ $('offer-load').onclick = event => run(event.target, async () => {
   showOffer(offer);
 });
 $('offer-disable').onclick = event => run(event.target, async () => {
-  if (!confirm('Disable this offer for new requests? Payments already in progress will remain tracked.')) return;
+  if (!await PaperclipReview.ask('Disable this offer for new requests? Payments already in progress will remain tracked.')) return;
   const session = token;
   await api('lightning/offers', undefined, 'DELETE');
   if (!token || token !== session || $('wallet').hidden) return;

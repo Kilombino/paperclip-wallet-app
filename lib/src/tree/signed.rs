@@ -176,6 +176,12 @@ impl TreeExitFunding {
 	pub fn anchor(self) -> Amount { self.anchor }
 	pub fn miner_fee(self) -> Amount { self.miner_fee }
 	pub fn per_transaction(self) -> Amount { self.anchor + self.miner_fee }
+	/// Narrow ordinary-transfer budget. Never use this for trees or HTLCs.
+	pub fn economical_transfer() -> Self {
+		Self { anchor: Amount::from_sat(330), miner_fee: Amount::from_sat(198),
+			format: bitcoin_ext::fee::ExitFormat::StandardV2 }
+	}
+
 	pub fn new(anchor: Amount, miner_fee: Amount) -> Result<Self, &'static str> {
 		// A four-way tree node and the supported hashlocked leaves are below
 		// 1,000 vbytes. Reserve at least this much for the 1 sat/vB profile.
@@ -217,6 +223,9 @@ impl VtxoTreeSpec {
 
 	/// Select the funded profile before the funding transaction or signatures exist.
 	pub fn with_exit_funding(mut self, funding: TreeExitFunding) -> Result<Self, &'static str> {
+		if funding.miner_fee() < Amount::from_sat(1000) {
+			return Err("economical transfer funding is not a tree budget");
+		}
 		if self.vtxos.len() < 2 { return Err("funded tree requires at least two leaves; use a board for one balance"); }
 		let overhead = funding.anchor.checked_add(funding.miner_fee).ok_or("reserve overflow")?;
 		let reserves = overhead.checked_mul(self.nb_nodes() as u64).ok_or("reserve overflow")?;

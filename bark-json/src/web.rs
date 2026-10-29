@@ -304,6 +304,8 @@ pub enum BarkNetwork {
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "utoipa", derive(ToSchema))]
 pub enum ChainSourceConfig {
+	/// Use the connection supplied by the local server package.
+	Platform,
 	/// Use a bitcoind RPC server
 	Bitcoind {
 		bitcoind: String,

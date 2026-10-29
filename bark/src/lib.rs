@@ -2614,6 +2614,7 @@ mod tests {
 			exit_profile: ark::exit_policy::PAPERCLIP_EXIT_PROFILE,
 			funded_lightning: false,
 			small_anchor_transfers: false,
+			economical_transfers: false,
 			network: Network::Regtest,
 			server_pubkey: pk,
 			mailbox_pubkey: pk,

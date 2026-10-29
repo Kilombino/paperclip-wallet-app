@@ -21,7 +21,8 @@ with tempfile.TemporaryDirectory(prefix='paperclip-platform-') as temporary:
     secret = secrets.token_hex(32)
     token = base64.urlsafe_b64encode(b'\0' + bytes.fromhex(secret)).decode()
     env = dict(os.environ, BARKD_DATADIR=str(data), BARKD_BIND_HOST='127.0.0.1',
-               BARKD_BIND_PORT=str(port), APP_PASSWORD=secret)
+               BARKD_BIND_PORT=str(port), APP_PASSWORD=secret,
+               BARKD_UI_DEFAULT_ARK_SERVER='https://operator.example')
     url = f'http://127.0.0.1:{port}'
 
     def request(path, authenticated=True, body=None):
@@ -56,6 +57,10 @@ with tempfile.TemporaryDirectory(prefix='paperclip-platform-') as temporary:
                 assert error.code == 401, error.code
             assert b'id="create-wallet"' in request('/', authenticated=False)
             assert b"api('wallet')" in request('/app.js', authenticated=False)
+            assert b'value="https://ark.paperclippool.xyz"' in request('/', authenticated=False)
+            assert b"api('/api/config')" in request('/app.js', authenticated=False)
+            assert b'.setup-actions' in request('/style.css', authenticated=False)
+            assert json.loads(request('/api/config'))['arkServer'] == 'https://operator.example'
             # Reject setup against a nonexistent local backend. No live RPC calls.
             try:
                 request('/api/v1/wallet/create', body={

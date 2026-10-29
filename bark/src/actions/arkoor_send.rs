@@ -42,6 +42,9 @@ pub struct ArkoorSend {
 	/// Fixed at planning; missing on old actions means the legacy budget.
 	#[serde(default)]
 	pub small_anchor_transfer: bool,
+	/// Persisted with the approved debit; old checkpoints retain their original budget.
+	#[serde(default)]
+	pub economical_transfer: bool,
 	/// Change piece amounts fixed at start. `None` when persisted by a
 	/// pre-split bark, meaning one whole change output.
 	#[serde(default, with = "crate::utils::serde::opt_amount_vec_sat")]
@@ -266,7 +269,7 @@ pub(crate) async fn start_arkoor_send(
 	if destination.policy().user_pubkey() == change_keypair.public_key() {
 		bail!("Cannot create arkoor to same address as change");
 	}
-	let (inputs, recovery_reserve, small_anchor_transfer) = wallet.plan_arkoor_payment(
+	let (inputs, recovery_reserve, small_anchor_transfer, economical_transfer) = wallet.plan_arkoor_payment(
 		amount, destination.policy().clone(), change_keypair.public_key(), chosen.as_deref(),
 	).await?;
 	check_send_cost(amount, recovery_reserve, max_total)?;
@@ -291,6 +294,7 @@ pub(crate) async fn start_arkoor_send(
 		input_vtxo_ids,
 		change_key_index,
 		small_anchor_transfer,
+		economical_transfer,
 		change_pieces: Some(split_change_amount(
 			change, amount, wallet.config().change_vtxo_split_factor,
 		)),
@@ -326,7 +330,7 @@ async fn run_cosign(wallet: &Wallet, send: &ArkoorSend) -> Result<Progress, Adva
 	// becomes `AdvanceError::Server` so the executor can route a genuine
 	// rejection to on_rejection instead of retrying forever.
 	let arkoor = wallet.create_checkpointed_arkoor_with_vtxos(
-		dest, inputs, change_keypair, send.change_pieces.clone(), send.small_anchor_transfer,
+		dest, inputs, change_keypair, send.change_pieces.clone(), send.small_anchor_transfer, send.economical_transfer,
 	).await?;
 
 	let initial_update = MovementUpdate::new()
@@ -428,6 +432,7 @@ mod test {
 			input_vtxo_ids: vec![],
 			change_key_index: 0,
 			small_anchor_transfer: false,
+			economical_transfer: false,
 			change_pieces: Some(vec![Amount::from_sat(5_000), Amount::from_sat(5_000)]),
 			progress: Progress::Cosigning,
 		}
@@ -452,6 +457,16 @@ mod test {
 		assert!(serde_json::from_value::<ArkoorSend>(json.clone()).unwrap().small_anchor_transfer);
 		json.as_object_mut().unwrap().remove("small_anchor_transfer");
 		assert!(!serde_json::from_value::<ArkoorSend>(json).unwrap().small_anchor_transfer);
+	}
+
+	#[test]
+	fn economical_budget_is_persisted_and_absent_on_legacy_actions() {
+		let mut send = dummy_send();
+		send.economical_transfer = true;
+		let mut json = serde_json::to_value(&send).unwrap();
+		assert!(serde_json::from_value::<ArkoorSend>(json.clone()).unwrap().economical_transfer);
+		json.as_object_mut().unwrap().remove("economical_transfer");
+		assert!(!serde_json::from_value::<ArkoorSend>(json).unwrap().economical_transfer);
 	}
 
 	#[test]

@@ -1,8 +1,6 @@
 name: Beta wallet images
 on:
   workflow_dispatch:
-  push:
-    tags: ['v*']
 permissions:
   contents: read
   packages: write
@@ -24,6 +22,10 @@ jobs:
         run: |
           python3 -m unittest discover -s deployment -p test_package.py
           python3 -m unittest discover -s deployment -p test_container.py
+          python3 -m unittest discover -s deployment -p test_platform_node.py
+          python3 -m unittest discover -s deployment -p test_managed_chain.py
+          python3 -m unittest discover -s deployment -p test_pruned_rpc.py
+          sha256sum -c SHARED-SOURCE.sha256
           node scripts/test-web.mjs
           node scripts/test-receive-qr.mjs
       - uses: docker/setup-buildx-action@v3
@@ -36,6 +38,9 @@ jobs:
         with:
           context: .
           file: deployment/Dockerfile
+          build-args: |
+            BARK_VERSION=0.9.1
+            GIT_HASH=${{ github.sha }}
           load: true
           tags: ghcr.io/connorslab/paperclip-wallet-app:build-${{ github.run_id }}-${{ matrix.arch }}
           cache-from: type=gha,scope=wallet-${{ matrix.arch }}
@@ -56,6 +61,8 @@ jobs:
           docker exec wallet-smoke python3 /usr/local/lib/paperclip/health.py
           docker exec wallet-smoke python3 -c "import os; assert os.environ['BARKD_UI_DEFAULT_ARK_SERVER']=='https://ark.paperclippool.xyz'"
           docker rm -f wallet-smoke
+          docker run --rm --network none --entrypoint paperclip-wallet "$IMAGE" --version | grep -F '0.9.1'
+          docker run --rm --network none -v "$PWD:/tests:ro" --entrypoint python3 "$IMAGE" /tests/deployment/test_daemon.py
           docker push "$IMAGE"
   manifest:
     needs: build

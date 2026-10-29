@@ -63,6 +63,20 @@ mod test {
 use super::*;
 
 	#[test]
+	fn p2a_cannot_reinterpret_existing_exit_formats() {
+		// These tags are part of signed VTXO history, not a runtime preference.
+		let legacy = ExitFormat::from_code(0).unwrap();
+		let standard = ExitFormat::from_code(1).unwrap();
+		assert_eq!(legacy.version(), Version(3));
+		assert_eq!(standard.version(), Version::TWO);
+		assert_eq!(legacy.anchor(Amount::from_sat(240)).script_pubkey, *P2A_SCRIPT);
+		assert_ne!(standard.anchor(Amount::from_sat(330)).script_pubkey, *P2A_SCRIPT);
+		for code in 2..=u8::MAX {
+			assert!(ExitFormat::from_code(code).is_err(), "unknown format {code} must fail closed");
+		}
+	}
+
+	#[test]
 	fn test_dust_fee_anchor_size() {
 		assert_eq!(
 			FEE_ANCHOR_WEIGHT,

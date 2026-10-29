@@ -145,6 +145,7 @@ impl From<ark::ArkInfo> for protos::ArkInfo {
 			exit_profile: v.exit_profile,
 		funded_lightning: v.funded_lightning,
 		small_anchor_transfers: v.small_anchor_transfers,
+		economical_transfers: v.economical_transfers,
 			network: v.network.to_string(),
 			server_pubkey: v.server_pubkey.serialize().to_vec(),
 			mailbox_pubkey: v.mailbox_pubkey.serialize().to_vec(),
@@ -185,6 +186,7 @@ impl TryFrom<protos::ArkInfo> for ark::ArkInfo {
 			exit_profile: v.exit_profile,
 		funded_lightning: v.funded_lightning,
 		small_anchor_transfers: v.small_anchor_transfers,
+		economical_transfers: v.economical_transfers,
 			network: v.network.parse().map_err(|_| "invalid network")?,
 			server_pubkey: PublicKey::from_slice(&v.server_pubkey)
 				.map_err(|_| "invalid server pubkey")?,
@@ -655,6 +657,11 @@ impl TryFrom<protos::ArkoorCosignRequest> for ArkoorCosignRequest<VtxoId> {
 		);
 		req.exit_funding = v.exit_funding.map(|f| {
 			let format = ark::exit_policy::ExitFormat::from_code(u8::try_from(f.exit_format).map_err(|_| "invalid exit format")?)?;
+			let economical = ark::exit_policy::economical_transfer_funding();
+			if f.anchor_sat == economical.anchor().to_sat()
+				&& f.miner_fee_sat == economical.miner_fee().to_sat() && format == economical.format() {
+				return Ok(economical);
+			}
 			Ok::<_, &'static str>(ark::tree::signed::TreeExitFunding::new(
 				Amount::from_sat(f.anchor_sat), Amount::from_sat(f.miner_fee_sat),
 			)?.with_format(format))
@@ -790,6 +797,30 @@ mod test {
 	use super::*;
 
 	#[test]
+	fn economical_funding_rpc_roundtrip_and_bounds() {
+		let budget = ark::exit_policy::economical_transfer_funding();
+		// Conversion fixture only; signature verification belongs to admission.
+		let request = protos::ArkoorCosignRequest {
+			input_vtxo_id: vec![0; 36], attestation: vec![0; 64], use_checkpoint: true,
+			exit_funding: Some(protos::ExitFunding {
+				anchor_sat: budget.anchor().to_sat(), miner_fee_sat: budget.miner_fee().to_sat(),
+				exit_format: u32::from(budget.format().code()),
+			}), ..Default::default()
+		};
+		let decoded = ArkoorCosignRequest::<VtxoId>::try_from(request.clone()).unwrap();
+		assert_eq!(decoded.exit_funding, Some(budget));
+		let encoded: protos::ArkoorCosignRequest = decoded.into();
+		assert_eq!(encoded.exit_funding, request.exit_funding);
+		for (anchor, fee, format) in [(330, 197, 1), (329, 198, 1), (330, 198, 0), (330, 198, 256)] {
+			let mut invalid = request.clone();
+			invalid.exit_funding = Some(protos::ExitFunding {
+				anchor_sat: anchor, miner_fee_sat: fee, exit_format: format,
+			});
+			assert!(ArkoorCosignRequest::<VtxoId>::try_from(invalid).is_err());
+		}
+	}
+
+	#[test]
 	fn test_preimage_bytes() {
 		let h = "ef2cb05d04819ddb2b9d960c7e0e295ea48ffb429712dc8f30aa48dfcc20c97e";
 		let b = Vec::<u8>::from_hex(h).unwrap();
@@ -812,6 +843,7 @@ mod test {
 			exit_profile: ark::exit_policy::PAPERCLIP_EXIT_PROFILE,
 			funded_lightning: false,
 			small_anchor_transfers: false,
+			economical_transfers: false,
 			network: "regtest".into(),
 			server_pubkey: pk.serialize().to_vec(),
 			mailbox_pubkey: pk.serialize().to_vec(),

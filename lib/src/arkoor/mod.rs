@@ -1298,6 +1298,13 @@ impl ArkoorBuilder<state::Initial> {
 				return Err(ArkoorConstructionError::IncompatibleExitFunding);
 			}
 		}
+		if exit_funding == Some(crate::exit_policy::economical_transfer_funding()) {
+			if !use_checkpoint || outputs.len() > 2 || !isolated_outputs.is_empty()
+				|| !matches!(input.policy(), VtxoPolicy::Pubkey(_))
+				|| outputs.iter().any(|o| !matches!(&o.policy, VtxoPolicy::Pubkey(_))) {
+				return Err(ArkoorConstructionError::IncompatibleExitFunding);
+			}
+		}
 		// Do some validation on the amounts
 		Self::validate_amounts(&input, &outputs, &isolated_outputs, use_checkpoint, exit_funding)?;
 
@@ -1331,6 +1338,16 @@ impl ArkoorBuilder<state::Initial> {
 			exit_funding,
 		);
 
+		if exit_funding == Some(crate::exit_policy::economical_transfer_funding()) {
+			for tx in unsigned_checkpoint_tx.iter().map(|(tx, _)| tx).chain(unsigned_arkoor_txs.iter()) {
+				let mut signed_size = tx.clone();
+				if signed_size.input.len() != 1 { return Err(ArkoorConstructionError::IncompatibleExitFunding); }
+				signed_size.input[0].witness = bitcoin::Witness::from_slice(&[vec![0u8; 65]]);
+				if signed_size.vsize() as u64 > exit_funding.expect("checked funding").miner_fee().to_sat() {
+					return Err(ArkoorConstructionError::IncompatibleExitFunding);
+				}
+			}
+		}
 		// Construct dust fanout tx if dust isolation is needed
 		let unsigned_isolation_fanout_tx = if !isolated_outputs.is_empty() {
 			// Combined dust isolation output is at index outputs.len()

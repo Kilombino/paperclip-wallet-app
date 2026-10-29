@@ -75,7 +75,7 @@ def adapter_args(root=ROOT, lib=LIB):
     if config['network'] not in ('main', 'regtest'):
         raise ValueError('Invalid adapter network')
     args = ['python3', str(lib / 'pruned_rpc.py'), '--node-url', config['rpc_url'],
-            '--node-cookie', str(root / 'backend.cookie'), '--client-cookie', str(root / 'client.cookie'),
+            '--node-cookie', config.get('node_cookie', str(root / 'backend.cookie')), '--client-cookie', str(root / 'client.cookie'),
             '--database', str(root / 'index.sqlite'), '--first-height', '0' if config['network'] == 'regtest' else '961640']
     if config['network'] == 'regtest':
         args.append('--regtest')
@@ -86,6 +86,7 @@ def supervise():
     os.umask(0o077)
     # Allows the explicit adapter handshake. Native txindex remains supported.
     os.environ['PAPERCLIP_PRUNED_RPC'] = '1'
+    os.environ['PAPERCLIP_PLATFORM_CONNECTION'] = str(ROOT / 'platform-wallet.json')
     stopped = False
     def stop(*_):
         nonlocal stopped
@@ -99,8 +100,19 @@ def supervise():
         time.sleep(1)
     wallet = None
     retry_at = 0
+    platform_retry_at = 0
     try:
         while not stopped and (wallet is None or wallet.poll() is None):
+            if os.environ.get('PAPERCLIP_NODE_RPC_URL') and time.monotonic() >= platform_retry_at:
+                from platform_node import prepare
+                from pruned_rpc import Node
+                try:
+                    prepare(ROOT, os.environ, Node)
+                except Exception:
+                    # The UI and existing manually configured wallets remain available.
+                    # Never include RPC URLs or secrets in diagnostics.
+                    print('Installed node setup is not ready; retrying in 30 seconds.', flush=True)
+                platform_retry_at = time.monotonic() + 30
             if (ROOT / 'backend.json').exists() and (adapter is None or adapter.poll() is not None) and time.monotonic() >= retry_at:
                 adapter = subprocess.Popen(adapter_args(), stdin=subprocess.DEVNULL)
                 retry_at = time.monotonic() + 10

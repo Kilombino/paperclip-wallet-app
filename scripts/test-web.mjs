@@ -10,11 +10,11 @@ function fixture(network, lightningEnabled = true, empty = false) {
   const element = id => {
     assert(ids.has(id), 'UI element must exist in the HTML: ' + id);
     if (!elements.has(id)) elements.set(id, {value: '', textContent: '', hidden: false,
-      setAttribute() {}, replaceChildren() {}, append() {}, addEventListener(type, fn) { this[type] = fn; }});
+      closest() { return this; }, setAttribute() {}, replaceChildren() {}, append() {}, addEventListener(type, fn) { this[type] = fn; }});
     return elements.get(id);
   };
   let failPath = null;
-  const context = vm.createContext({PaperclipReceive: {show() {}, clear() {}}, document: {getElementById: element, createElement: () => ({textContent:'',append() {}})}, confirm: () => true, URL, btoa, setInterval: () => {}, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+  const context = vm.createContext({PaperclipReview: {ask: async () => true, cancel() {}}, PaperclipReceive: {show() {}, clear() {}}, document: {getElementById: element, createElement: () => ({textContent:'',append() {}})}, confirm: () => true, URL, btoa, setInterval: () => {}, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     fetch: async (path, options) => {
       calls.push({path, options});
       if (failPath && path.endsWith(failPath)) throw Error('Transport interrupted');
@@ -184,7 +184,7 @@ for (const mode of ['cancel', 'estimate-error', 'approve', 'malformed']) {
   f.element('token').value = 'test-token'; await f.trigger('unlock', 'submit');
   f.element('destination').value = 'ark1-recipient'; f.element('amount').value = '2000';
   let confirmation = '';
-  f.context.confirm = text => { confirmation = text; return mode !== 'cancel'; };
+  f.context.PaperclipReview.ask = async text => { confirmation = text; return mode !== 'cancel'; };
   if (mode === 'estimate-error') f.fail('/fees/ark/send');
   if (mode === 'malformed') {
     const fetch = f.context.fetch;
@@ -247,7 +247,7 @@ for (const scenario of ['approve', 'cancel', 'lock', 'edit']) {
   f.element('message-address').value = 'bc1p-test';
   f.element('message-text').value = '  Paperclip challenge\nnonce: 123\n';
   let review = '';
-  f.context.confirm = text => {review = text; return scenario !== 'cancel';};
+  f.context.PaperclipReview.ask = async text => {review = text; return scenario !== 'cancel';};
   const fetch = f.context.fetch;
   f.context.fetch = async (path, options) => {
     const result = await fetch(path, options);
@@ -281,7 +281,7 @@ for (const mode of ['approve', 'cancel', 'error', 'malformed', 'lock', 'edit']) 
   f.element('token').value = 'test-token'; await f.trigger('unlock', 'submit');
   f.element('ln-destination').value = 'lno-test-offer'; f.element('ln-amount').value = '50000';
   let review = '';
-  f.context.confirm = text => { review = text; return mode !== 'cancel'; };
+  f.context.PaperclipReview.ask = async text => { review = text; return mode !== 'cancel'; };
   const fetch = f.context.fetch;
   f.context.fetch = async (path, options) => {
     if (path.includes('/fees/lightning/pay?')) {

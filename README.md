@@ -5,7 +5,7 @@ contributors. This edition presets new wallets to **https://ark.paperclippool.xy
 Existing wallet configuration is preserved. Wallet keys stay on your device.
 
 **Public beta. Paperclip Ark is open for XBT deposits, Ark transfers, and Lightning payments.**
-The current release is **0.8.3 beta**. Check [service status](https://ark.paperclippool.xyz/) before funding.
+The current release is **[0.9.1 beta](https://github.com/connorslab/paperclip-wallet-app/releases/tag/v0.9.1-beta.1)**. Check [service status](https://ark.paperclippool.xyz/) before funding.
 
 Current beta limits: boarding starts at **20,000 sats**; Lightning payments are
 limited to **250,000 sats**. Fees and recovery reserves apply. Very small Lightning
@@ -16,6 +16,26 @@ payments can be below the funded-HTLC minimum. The server can change these limit
 **Not independently audited.** Paperclip Wallet and its Ark integration are
 experimental and provided without warranty. Functional tests are not a security
 audit. Bugs can cause loss of funds. Use only amounts you can afford to lose.
+
+## 0.9.1 setup hotfix
+
+Restores the configured ASP URL in setup and fixes checkbox and button layout.
+Paperclip is prefilled for new wallets; custom server settings and edits are
+preserved. Existing wallet data, payment logic, recovery formats, and fees are
+unchanged. Update in place after backing up the complete wallet.
+
+## 0.9.0
+
+Ordinary Ark sends on compatible servers allocate 1,056 sats without change or
+1,584 sats with change for one input. Existing recovery signatures and older
+wallet support are preserved. Lightning and tree recovery budgets are unchanged.
+The browser wallet adds smoother navigation, explicit payment review, clearer
+status, and connection settings. Installed compatible node connections can be
+configured without copying RPC credentials into the browser.
+
+P2A is not enabled: it requires a new recovery format and recipient negotiation.
+See [fee validation and compatibility](docs/fees-0.9.0.md). The production ASP supports the new allocation and previous wallet versions.
+Release assets are signed; platform-specific validation limits are listed in the release notes.
 
 ## What changed in 0.8.3
 

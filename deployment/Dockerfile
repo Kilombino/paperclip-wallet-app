@@ -1,8 +1,11 @@
 # Build separately for linux/amd64 and linux/arm64. Publish only after native tests.
-FROM rust:1.90.0-bookworm AS build
+FROM rust:1.91.0-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends clang libclang-dev cmake pkg-config protobuf-compiler libssl-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 ENV CARGO_BUILD_JOBS=2
+ARG BARK_VERSION=0.9.1
+ARG GIT_HASH=unknown
+ENV BARK_VERSION=${BARK_VERSION} GIT_HASH=${GIT_HASH}
 COPY . .
 ENV BARK_WEB_DIST=/src/web
 RUN cargo build --locked --release -p bark-cli --features barkd-web-ui --bins
@@ -13,7 +16,7 @@ COPY --from=build /src/target/release/paperclip-wallet /src/target/release/paper
 COPY deployment/container-entrypoint.py /usr/local/lib/paperclip/entrypoint.py
 COPY deployment/startos-action.py deployment/startos-entrypoint.py /usr/local/lib/paperclip/
 COPY deployment/health.py /usr/local/lib/paperclip/
-COPY deployment/pruned_rpc.py deployment/managed-chain.py /usr/local/lib/paperclip/
+COPY deployment/pruned_rpc.py deployment/managed-chain.py deployment/platform_node.py /usr/local/lib/paperclip/
 USER 1000:1000
 ENV BARKD_DATADIR=/data/wallet BARKD_BIND_HOST=0.0.0.0 BARKD_BIND_PORT=3000
 ENV BARKD_UI_DEFAULT_ARK_SERVER=https://ark.paperclippool.xyz
