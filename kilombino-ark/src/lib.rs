@@ -87,6 +87,8 @@ fn create_opts(req: CreateWalletRequest) -> anyhow::Result<CreateOpts> {
 				},
 			}
 		},
+		// The server packages' own node connection: a phone has none.
+		Some(ChainSourceConfig::Platform) => anyhow::bail!("no installed node connection on a phone"),
 		None => {},
 	}
 	Ok(CreateOpts {
