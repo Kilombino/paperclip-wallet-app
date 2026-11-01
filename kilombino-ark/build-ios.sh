@@ -25,7 +25,8 @@ xcodebuild -create-xcframework \
 cd "$out"
 find KilombinoArk.xcframework | sort
 du -sh KilombinoArk.xcframework KilombinoArk.xcframework/*
-nm -gU KilombinoArk.xcframework/ios-arm64/libkilombino_ark.a 2>/dev/null | grep -E ' _kilombino_ark_(start|stop|free)$'
+# nm exits non-zero on members with no symbols: only its output counts.
+{ nm -gU KilombinoArk.xcframework/ios-arm64/libkilombino_ark.a 2>/dev/null || true; } | grep -E ' _kilombino_ark_(start|stop|free)$'
 # A stable zip (sorted entries, fixed times) so the hash depends on the contents only.
 find KilombinoArk.xcframework -exec touch -h -t 202601010000 {} +
 find KilombinoArk.xcframework \( -type f -o -type l \) | LC_ALL=C sort | zip -q -X -y -9 KilombinoArk.xcframework.zip -@
