@@ -1,0 +1,5 @@
+module KilombinoArk {
+    header "kilombino_ark.h"
+    link "kilombino_ark"
+    export *
+}

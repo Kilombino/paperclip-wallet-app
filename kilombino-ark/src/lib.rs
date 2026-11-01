@@ -13,6 +13,8 @@
 //!   and hands it over in memory on every start and on wallet creation.
 //!
 //! JNI surface: `start(datadir, port, mnemonic, passphrase) -> token` and `stop()`. Everything else is HTTP.
+//! iOS gets the same two calls as plain C functions (`kilombino_ark_start`/`_stop`, see
+//! `include/kilombino_ark.h`), built only for iOS so the Android library does not change.
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -221,6 +223,74 @@ pub fn stop() {
 			w.stop_daemon();
 		}
 		let _ = runtime().block_on(r.server.stop_wait());
+	}
+}
+
+// ---------------------------------------------------------------------------- C (iOS)
+
+/// The iOS app links this crate as a static library and calls these from Swift. Strings in are
+/// NUL-terminated UTF-8; the string out is owned by the caller, who frees it with
+/// [kilombino_ark_free]. The app's own secp256k1 is used for its signatures, so only the engine
+/// is exposed here.
+#[cfg(target_os = "ios")]
+mod c_api {
+	use super::*;
+	use std::ffi::{CStr, CString, c_char};
+
+	/// A string argument, or None for a null pointer. Unreadable text is an error, never "none":
+	/// that would silently open a different (empty-looking) wallet.
+	unsafe fn arg(p: *const c_char, what: &str) -> Result<Option<String>, String> {
+		if p.is_null() {
+			return Ok(None);
+		}
+		// SAFETY: the caller passes a valid NUL-terminated string that outlives this call.
+		unsafe { CStr::from_ptr(p) }.to_str().map(|s| Some(s.to_owned()))
+			.map_err(|e| format!("could not read the {what}: {e}"))
+	}
+
+	fn out(s: String) -> *mut c_char {
+		CString::new(s.replace('\0', " ")).map(CString::into_raw).unwrap_or(std::ptr::null_mut())
+	}
+
+	/// `kilombino_ark_start(datadir, port, mnemonic, passphrase)`: the bearer token, or
+	/// "ERR:<message>". `mnemonic` is null while the app has no Ark wallet yet; `passphrase`
+	/// is "" (or null) for none.
+	///
+	/// # Safety
+	/// Every non-null pointer must be a valid NUL-terminated string.
+	#[unsafe(no_mangle)]
+	pub unsafe extern "C" fn kilombino_ark_start(
+		datadir: *const c_char, port: u16, mnemonic: *const c_char, passphrase: *const c_char,
+	) -> *mut c_char {
+		let r = (|| {
+			// SAFETY: forwarded from this function's contract.
+			let dir = unsafe { arg(datadir, "datadir") }?.ok_or("bad datadir: null")?;
+			let words = unsafe { arg(mnemonic, "words") }?;
+			let passphrase = unsafe { arg(passphrase, "passphrase") }?.unwrap_or_default();
+			start(&PathBuf::from(dir), port, words.as_deref(), &passphrase).map_err(|e| format!("{:#}", e))
+		})();
+		out(match r {
+			Ok(token) => token,
+			Err(e) => format!("ERR:{e}"),
+		})
+	}
+
+	/// `kilombino_ark_stop()`.
+	#[unsafe(no_mangle)]
+	pub extern "C" fn kilombino_ark_stop() {
+		stop();
+	}
+
+	/// Frees a string returned by [kilombino_ark_start].
+	///
+	/// # Safety
+	/// `s` must come from [kilombino_ark_start] and be freed once.
+	#[unsafe(no_mangle)]
+	pub unsafe extern "C" fn kilombino_ark_free(s: *mut c_char) {
+		if !s.is_null() {
+			// SAFETY: made by CString::into_raw in `out`.
+			drop(unsafe { CString::from_raw(s) });
+		}
 	}
 }
 
